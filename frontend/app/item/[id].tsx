@@ -7,12 +7,14 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Image,
+  Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+import { parseAddContentMeta } from '../../data/add-content';
+import { deleteItem, getItemById } from '../../services/api';
 
 interface Item {
   id: string;
@@ -20,6 +22,7 @@ interface Item {
   title: string;
   description: string;
   notes?: string;
+  image?: string;
   url?: string;
   createdAt: string;
   updatedAt: string;
@@ -31,15 +34,15 @@ export default function ItemDetailScreen() {
   const [item, setItem] = useState<Item | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const metadata = parseAddContentMeta(item?.notes);
+
   useEffect(() => {
     fetchItem();
   }, [id]);
 
   const fetchItem = async () => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/items/${id}`);
-      if (!response.ok) throw new Error('Failed to fetch item');
-      const data = await response.json();
+      const data = await getItemById(id);
       setItem(data);
     } catch (error) {
       console.error('Error fetching item:', error);
@@ -71,10 +74,7 @@ export default function ItemDetailScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const response = await fetch(`${BACKEND_URL}/api/items/${id}`, {
-                method: 'DELETE',
-              });
-              if (!response.ok) throw new Error('Failed to delete item');
+              await deleteItem(id);
               router.back();
             } catch (error) {
               console.error('Error deleting item:', error);
@@ -84,6 +84,38 @@ export default function ItemDetailScreen() {
         },
       ]
     );
+  };
+
+  const handleOpenLink = async (rawLink: string) => {
+    const normalizedLink = /^https?:\/\//i.test(rawLink) ? rawLink : `https://${rawLink}`;
+
+    try {
+      const supported = await Linking.canOpenURL(normalizedLink);
+      if (!supported) {
+        Alert.alert('Invalid link', 'Unable to open this link.');
+        return;
+      }
+
+      await Linking.openURL(normalizedLink);
+    } catch (error) {
+      console.error('Error opening link:', error);
+      Alert.alert('Error', 'Failed to open link.');
+    }
+  };
+
+  const handleOpenFile = () => {
+    if (!metadata?.fileUri) {
+      return;
+    }
+
+    router.push({
+      pathname: '/item/file-viewer',
+      params: {
+        uri: encodeURIComponent(metadata.fileUri),
+        name: encodeURIComponent(metadata.fileName ?? 'Document'),
+        mimeType: encodeURIComponent(metadata.fileMimeType ?? ''),
+      },
+    });
   };
 
   if (loading) {
@@ -137,17 +169,56 @@ export default function ItemDetailScreen() {
           </View>
         ) : null}
 
+        {metadata?.subcategory ? (
+          <View style={styles.section}>
+            <Text style={styles.label}>Subcategory / Type</Text>
+            <Text style={styles.value}>{metadata.subcategory}</Text>
+          </View>
+        ) : null}
+
+        {item.image || metadata?.imageUri ? (
+          <View style={styles.section}>
+            <Text style={styles.label}>Image</Text>
+            <Image
+              source={{ uri: item.image || metadata?.imageUri }}
+              style={styles.previewImage}
+              resizeMode="cover"
+            />
+          </View>
+        ) : null}
+
         {item.notes ? (
           <View style={styles.section}>
             <Text style={styles.label}>Notes</Text>
-            <Text style={styles.value}>{item.notes}</Text>
+            <Text style={styles.value}>{metadata ? 'Structured add-content metadata saved.' : item.notes}</Text>
+          </View>
+        ) : null}
+
+        {metadata?.externalLink ? (
+          <View style={styles.section}>
+            <Text style={styles.label}>External Link</Text>
+            <TouchableOpacity onPress={() => handleOpenLink(metadata.externalLink ?? '')}>
+              <Text style={[styles.value, styles.urlText]}>{metadata.externalLink}</Text>
+            </TouchableOpacity>
           </View>
         ) : null}
 
         {item.url ? (
           <View style={styles.section}>
-            <Text style={styles.label}>URL</Text>
-            <Text style={[styles.value, styles.urlText]}>{item.url}</Text>
+            <Text style={styles.label}>Website Link</Text>
+            <TouchableOpacity onPress={() => handleOpenLink(item.url ?? '')}>
+              <Text style={[styles.value, styles.urlText]}>{item.url}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {metadata?.fileUri ? (
+          <View style={styles.section}>
+            <Text style={styles.label}>Attached File</Text>
+            <TouchableOpacity style={styles.fileButton} onPress={handleOpenFile}>
+              <Ionicons name="document-outline" size={18} color="#D6DEED" />
+              <Text style={styles.fileButtonText}>{metadata.fileName ?? 'Open file'}</Text>
+            </TouchableOpacity>
           </View>
         ) : null}
 
@@ -244,6 +315,30 @@ const styles = StyleSheet.create({
   },
   urlText: {
     color: '#4ECDC4',
+  },
+  previewImage: {
+    width: '100%',
+    height: 190,
+    borderRadius: 12,
+    backgroundColor: '#151A22',
+  },
+  fileButton: {
+    borderWidth: 1,
+    borderColor: '#242B38',
+    borderRadius: 10,
+    backgroundColor: '#151A22',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'flex-start',
+  },
+  fileButtonText: {
+    color: '#D6DEED',
+    fontSize: 13,
+    fontWeight: '600',
+    maxWidth: 240,
   },
   metaSection: {
     marginTop: 16,

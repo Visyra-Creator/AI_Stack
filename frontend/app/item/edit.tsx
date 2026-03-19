@@ -3,19 +3,28 @@ import {
   View,
   Text,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
   Alert,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+import { InputField } from '../../components/InputField';
+import { ImageUpload } from '../../components/ImageUpload';
+import { FileUpload, UploadFileValue } from '../../components/FileUpload';
+import {
+  AddContentCategory,
+  categorySubcategoryOptions,
+  isAddContentCategory,
+  parseAddContentMeta,
+  serializeAddContentMeta,
+} from '../../data/add-content';
+import { getItemById, updateItem } from '../../services/api';
 
 interface Item {
   id: string;
@@ -23,6 +32,7 @@ interface Item {
   title: string;
   description: string;
   notes?: string;
+  image?: string;
   url?: string;
 }
 
@@ -31,10 +41,19 @@ export default function EditItemScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [title, setTitle] = useState('');
+  const [currentCategory, setCurrentCategory] = useState(category ?? '');
+  const [heading, setHeading] = useState('');
+  const [subcategory, setSubcategory] = useState('');
   const [description, setDescription] = useState('');
-  const [notes, setNotes] = useState('');
-  const [url, setUrl] = useState('');
+  const [legacyNotes, setLegacyNotes] = useState('');
+  const [externalLink, setExternalLink] = useState('');
+  const [websiteLink, setWebsiteLink] = useState('');
+  const [imageUri, setImageUri] = useState('');
+  const [uploadedFile, setUploadedFile] = useState<UploadFileValue | null>(null);
+
+  const parsedCategory = isAddContentCategory(currentCategory)
+    ? (currentCategory as AddContentCategory)
+    : null;
 
   useEffect(() => {
     fetchItem();
@@ -42,14 +61,38 @@ export default function EditItemScreen() {
 
   const fetchItem = async () => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/items/${id}`);
-      if (!response.ok) throw new Error('Failed to fetch item');
-      const data: Item = await response.json();
-      
-      setTitle(data.title);
+      const data: Item = await getItemById(id);
+
+      const normalizedCategory = data.category || category || '';
+      const configCategory = isAddContentCategory(normalizedCategory)
+        ? (normalizedCategory as AddContentCategory)
+        : null;
+      const parsedMeta = parseAddContentMeta(data.notes);
+
+      setCurrentCategory(normalizedCategory);
+      setHeading(data.title);
       setDescription(data.description || '');
-      setNotes(data.notes || '');
-      setUrl(data.url || '');
+      setWebsiteLink(data.url || '');
+      setImageUri(parsedMeta?.imageUri || data.image || '');
+      setExternalLink(parsedMeta?.externalLink || '');
+
+      if (parsedMeta?.fileUri) {
+        setUploadedFile({
+          name: parsedMeta.fileName || 'Document',
+          uri: parsedMeta.fileUri,
+          mimeType: parsedMeta.fileMimeType,
+        });
+      }
+
+      if (parsedMeta?.subcategory) {
+        setSubcategory(parsedMeta.subcategory);
+      } else if (configCategory) {
+        setSubcategory(categorySubcategoryOptions[configCategory][0]);
+      }
+
+      if (!parsedMeta && data.notes) {
+        setLegacyNotes(data.notes);
+      }
     } catch (error) {
       console.error('Error fetching item:', error);
       Alert.alert('Error', 'Failed to load item');
@@ -59,29 +102,60 @@ export default function EditItemScreen() {
     }
   };
 
-  const handleSave = async () => {
-    if (!title.trim()) {
-      Alert.alert('Error', 'Please enter a title');
+  const openLink = async (rawLink: string) => {
+    const trimmedLink = rawLink.trim();
+    if (!trimmedLink) {
       return;
     }
 
+    const normalizedLink = /^https?:\/\//i.test(trimmedLink) ? trimmedLink : `https://${trimmedLink}`;
+
+    try {
+      const supported = await Linking.canOpenURL(normalizedLink);
+      if (!supported) {
+        Alert.alert('Invalid link', 'Unable to open this URL.');
+        return;
+      }
+
+      await Linking.openURL(normalizedLink);
+    } catch (error) {
+      console.error('Open link error:', error);
+      Alert.alert('Error', 'Failed to open the link.');
+    }
+  };
+
+  const handleSave = async () => {
+    if (!heading.trim()) {
+      Alert.alert('Error', 'Heading is required.');
+      return;
+    }
+
+    if (!description.trim()) {
+      Alert.alert('Error', 'Description is required.');
+      return;
+    }
+
+    const metadata = serializeAddContentMeta({
+      subcategory,
+      externalLink: externalLink.trim() || undefined,
+      imageUri: imageUri || undefined,
+      fileName: uploadedFile?.name,
+      fileUri: uploadedFile?.uri,
+      fileMimeType: uploadedFile?.mimeType,
+    });
+
+    const finalNotes = metadata ?? (legacyNotes.trim() || null);
+
     setSaving(true);
     try {
-      const response = await fetch(`${BACKEND_URL}/api/items/${id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          category,
-          title: title.trim(),
-          description: description.trim(),
-          notes: notes.trim() || null,
-          url: url.trim() || null,
-        }),
+      await updateItem(id, {
+        category: currentCategory,
+        title: heading.trim(),
+        description: description.trim(),
+        notes: finalNotes,
+        image: imageUri || null,
+        url: websiteLink.trim() || null,
       });
-
-      if (!response.ok) throw new Error('Failed to update item');
 
       router.back();
     } catch (error) {
@@ -111,7 +185,7 @@ export default function EditItemScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="close" size={24} color="#FFFFFF" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Edit Item</Text>
+          <Text style={styles.headerTitle}>Edit Content</Text>
           <TouchableOpacity
             onPress={handleSave}
             style={styles.saveButton}
@@ -131,65 +205,98 @@ export default function EditItemScreen() {
           contentContainerStyle={styles.contentContainer}
           keyboardShouldPersistTaps="handled"
         >
+          <Text style={styles.groupTitle}>Basic Info</Text>
+
           <View style={styles.section}>
             <Text style={styles.label}>Category</Text>
             <View style={styles.categoryBadge}>
-              <Text style={styles.categoryText}>{category}</Text>
+              <Text style={styles.categoryText}>{currentCategory}</Text>
             </View>
           </View>
 
-          <View style={styles.section}>
-            <Text style={styles.label}>Title *</Text>
-            <TextInput
-              style={styles.input}
-              value={title}
-              onChangeText={setTitle}
-              placeholder="Enter title"
-              placeholderTextColor="#444444"
-            />
+          {parsedCategory ? (
+            <View style={styles.section}>
+              <Text style={styles.label}>Subcategory / Type</Text>
+              <View style={styles.optionWrap}>
+                {categorySubcategoryOptions[parsedCategory].map((option) => (
+                  <TouchableOpacity
+                    key={option}
+                    style={[styles.optionChip, subcategory === option && styles.optionChipActive]}
+                    onPress={() => setSubcategory(option)}
+                  >
+                    <Text style={[styles.optionText, subcategory === option && styles.optionTextActive]}>
+                      {option}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
+          <InputField
+            label="Heading"
+            value={heading}
+            onChangeText={setHeading}
+            placeholder="Enter heading"
+            required
+          />
+
+          <InputField
+            label="Description"
+            value={description}
+            onChangeText={setDescription}
+            placeholder="Summarize the content"
+            required
+            multiline
+          />
+
+          <Text style={styles.groupTitle}>Media</Text>
+          <ImageUpload imageUri={imageUri} onChange={setImageUri} />
+          <FileUpload file={uploadedFile} onChange={setUploadedFile} />
+
+          <Text style={styles.groupTitle}>Links</Text>
+          <InputField
+            label="External Link"
+            value={externalLink}
+            onChangeText={setExternalLink}
+            placeholder="YouTube / Instagram / app link"
+            keyboardType="url"
+          />
+
+          <InputField
+            label="Website Link"
+            value={websiteLink}
+            onChangeText={setWebsiteLink}
+            placeholder="https://example.com"
+            keyboardType="url"
+          />
+
+          <View style={styles.linkActionsRow}>
+            <TouchableOpacity
+              style={styles.linkActionButton}
+              onPress={() => openLink(externalLink)}
+              activeOpacity={0.86}
+            >
+              <Text style={styles.linkActionText}>Open External Link</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.linkActionButton}
+              onPress={() => openLink(websiteLink)}
+              activeOpacity={0.86}
+            >
+              <Text style={styles.linkActionText}>Open Website Link</Text>
+            </TouchableOpacity>
           </View>
 
-          <View style={styles.section}>
-            <Text style={styles.label}>Description</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              value={description}
-              onChangeText={setDescription}
-              placeholder="Enter description"
-              placeholderTextColor="#444444"
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.label}>Notes</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              value={notes}
-              onChangeText={setNotes}
+          {!parsedCategory ? (
+            <InputField
+              label="Notes"
+              value={legacyNotes}
+              onChangeText={setLegacyNotes}
               placeholder="Additional notes"
-              placeholderTextColor="#444444"
               multiline
-              numberOfLines={4}
-              textAlignVertical="top"
             />
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.label}>URL</Text>
-            <TextInput
-              style={styles.input}
-              value={url}
-              onChangeText={setUrl}
-              placeholder="https://"
-              placeholderTextColor="#444444"
-              keyboardType="url"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-          </View>
+          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -247,6 +354,12 @@ const styles = StyleSheet.create({
   contentContainer: {
     padding: 24,
   },
+  groupTitle: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
   section: {
     marginBottom: 24,
   },
@@ -270,17 +383,48 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
   },
-  input: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#2A2A2A',
+  optionWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
   },
-  textArea: {
-    minHeight: 120,
-    paddingTop: 16,
+  optionChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#2A3241',
+    backgroundColor: '#151A22',
+  },
+  optionChipActive: {
+    borderColor: '#3A7AFE',
+    backgroundColor: '#1A2440',
+  },
+  optionText: {
+    color: '#9BA5B8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  optionTextActive: {
+    color: '#D7E3FF',
+  },
+  linkActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 18,
+  },
+  linkActionButton: {
+    flex: 1,
+    backgroundColor: '#151A22',
+    borderWidth: 1,
+    borderColor: '#242B38',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  linkActionText: {
+    color: '#D6DEED',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

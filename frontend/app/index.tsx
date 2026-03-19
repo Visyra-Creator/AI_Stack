@@ -3,44 +3,41 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   ScrollView,
   StatusBar,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
-interface Category {
-  id: string;
-  name: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  color: string;
-}
-
-const categories: Category[] = [
-  { id: '1', name: 'AI Stack Tracker', icon: 'layers-outline', color: '#FF6B6B' },
-  { id: '2', name: 'Prompts', icon: 'chatbubbles-outline', color: '#4ECDC4' },
-  { id: '3', name: 'Informations', icon: 'information-circle-outline', color: '#45B7D1' },
-  { id: '4', name: 'Tools', icon: 'build-outline', color: '#FFA07A' },
-  { id: '5', name: 'Tutorials', icon: 'school-outline', color: '#98D8C8' },
-  { id: '6', name: 'Open Source', icon: 'code-slash-outline', color: '#6C5CE7' },
-  { id: '7', name: 'Lead Generation', icon: 'people-outline', color: '#A29BFE' },
-  { id: '8', name: 'Personal Prompts', icon: 'bookmark-outline', color: '#FD79A8' },
-  { id: '9', name: 'Photography', icon: 'camera-outline', color: '#FDCB6E' },
-  { id: '10', name: 'Content Creation', icon: 'create-outline', color: '#00B894' },
-  { id: '11', name: 'Marketing', icon: 'trending-up-outline', color: '#E17055' },
-  { id: '12', name: 'Video Generation AI', icon: 'videocam-outline', color: '#00CEC9' },
-];
+import { CategoryCard } from '../components/CategoryCard';
+import { QuickActionCard } from '../components/QuickActionCard';
+import { DashboardCategory, categories, quickActions } from '../data/categories';
 
 export default function Index() {
   const router = useRouter();
 
-  const handleCategoryPress = (category: Category) => {
+  const handleCategoryPress = (category: DashboardCategory) => {
+    if (category.id === 'learning') {
+      router.push('/learning');
+      return;
+    }
+
     router.push({
       pathname: '/category/[name]',
-      params: { name: category.name }
+      params: { name: category.title }
     });
+  };
+
+  const handleQuickActionPress = (actionRoute: string) => {
+    if (actionRoute.startsWith('/category/')) {
+      const categoryName = actionRoute.replace('/category/', '');
+      const category = categories.find((item) => item.title === categoryName);
+      if (category) {
+        handleCategoryPress(category);
+      }
+      return;
+    }
+
+    router.push(actionRoute as never);
   };
 
   return (
@@ -50,28 +47,48 @@ export default function Index() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Mission Control</Text>
-        <Text style={styles.headerSubtitle}>AI Stack Keeper</Text>
+        <Text style={styles.headerSubtitle}>Your AI-powered growth system</Text>
       </View>
 
-      {/* Category Grid */}
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.grid}
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {categories.map((category) => (
-          <TouchableOpacity
-            key={category.id}
-            style={styles.card}
-            onPress={() => handleCategoryPress(category)}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.iconContainer, { backgroundColor: category.color }]}>
-              <Ionicons name={category.icon} size={32} color="#FFFFFF" />
-            </View>
-            <Text style={styles.cardTitle}>{category.name}</Text>
-          </TouchableOpacity>
-        ))}
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Quick Actions</Text>
+          <Text style={styles.sectionHint}>Execution first</Text>
+        </View>
+
+        <View style={styles.quickActionsGrid}>
+          {quickActions.map((action) => (
+            <QuickActionCard
+              key={action.id}
+              title={action.title}
+              icon={action.icon}
+              accent={action.accent}
+              onPress={() => handleQuickActionPress(action.route)}
+            />
+          ))}
+        </View>
+
+        <View style={[styles.sectionHeaderRow, styles.categorySectionHeader]}>
+          <Text style={styles.sectionTitle}>Main Categories</Text>
+          <Text style={styles.sectionHint}>5 focused systems</Text>
+        </View>
+
+        <View style={styles.categoryGrid}>
+          {categories.map((category) => (
+            <CategoryCard
+              key={category.id}
+              title={category.title}
+              description={category.description}
+              icon={category.icon}
+              accent={category.accent}
+                      onPress={() => handleCategoryPress(category)}
+            />
+          ))}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -84,51 +101,53 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 24,
+    paddingTop: 14,
+    paddingBottom: 18,
   },
   headerTitle: {
-    fontSize: 32,
+    fontSize: 34,
     fontWeight: 'bold',
     color: '#FFFFFF',
-    marginBottom: 4,
+    letterSpacing: 0.4,
+    marginBottom: 6,
   },
   headerSubtitle: {
     fontSize: 16,
-    color: '#888888',
+    color: '#9AA0AB',
   },
   scrollView: {
     flex: 1,
   },
-  grid: {
-    padding: 16,
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  sectionHint: {
+    fontSize: 13,
+    color: '#7E8694',
+  },
+  quickActionsGrid: {
+    marginBottom: 28,
+    gap: 10,
+  },
+  categorySectionHeader: {
+    marginBottom: 14,
+  },
+  categoryGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-  },
-  card: {
-    width: '48%',
-    backgroundColor: '#1A1A1A',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 140,
-  },
-  iconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  cardTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    textAlign: 'center',
-    lineHeight: 18,
+    rowGap: 12,
   },
 });

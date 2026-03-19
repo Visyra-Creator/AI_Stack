@@ -12,8 +12,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+import { deleteItem, getItemsByCategory } from '../../services/api';
 
 interface Item {
   id: string;
@@ -35,9 +34,7 @@ export default function CategoryScreen() {
 
   const fetchItems = async () => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/items?category=${encodeURIComponent(name)}`);
-      if (!response.ok) throw new Error('Failed to fetch items');
-      const data = await response.json();
+      const data = await getItemsByCategory(name);
       setItems(data);
     } catch (error) {
       console.error('Error fetching items:', error);
@@ -68,10 +65,7 @@ export default function CategoryScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const response = await fetch(`${BACKEND_URL}/api/items/${itemId}`, {
-                method: 'DELETE',
-              });
-              if (!response.ok) throw new Error('Failed to delete item');
+              await deleteItem(itemId);
               fetchItems();
             } catch (error) {
               console.error('Error deleting item:', error);
@@ -95,8 +89,8 @@ export default function CategoryScreen() {
 
   const handleAddPress = () => {
     router.push({
-      pathname: '/item/add',
-      params: { category: name }
+      pathname: '/item/select-category',
+      params: { initialCategory: name },
     });
   };
 
