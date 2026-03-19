@@ -1,0 +1,36 @@
+# ENV
+
+.env
+backend/.env
+frontend/.env
+
+# Python
+
+backend/venv/
+**pycache**/
+*.pyc
+
+# Node / Expo
+
+frontend/node_modules/
+frontend/.expo/
+frontend/.expo-shared/
+
+# Logs
+
+*.log
+
+# OS
+
+.DS_Store
+Thumbs.db
+
+# Temp
+
+*.tmp
+*.swp
+
+# IDE
+
+.idea/
+.vscode/
