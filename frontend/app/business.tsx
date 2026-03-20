@@ -13,6 +13,8 @@ import {
   RefreshControl,
   FlatList,
   useWindowDimensions,
+  Image,
+  GestureResponderEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -21,7 +23,9 @@ import { useTheme } from '@/src/context/ThemeContext';
 import { Card } from '@/src/components/common/Card';
 import { FormInput } from '@/src/components/common/FormInput';
 import { Select } from '@/src/components/common/Select';
+import { MultiSelect } from '@/src/components/common/MultiSelect';
 import { EmptyState } from '@/src/components/common/EmptyState';
+import * as ImagePicker from 'expo-image-picker';
 import { businessStorage, businessCategoryStorage, BusinessItem } from '@/src/services/storage';
 
 const SORT_OPTIONS = [
@@ -52,6 +56,13 @@ export default function BusinessScreen() {
   const [sortModalVisible, setSortModalVisible] = useState(false);
   const [newSection, setNewSection] = useState('');
   const [sectionModalVisible, setSectionModalVisible] = useState(false);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [activeFilter, setActiveFilter] = useState('All');
+  const [categoriesModalVisible, setCategoriesModalVisible] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState('');
+  const [images, setImages] = useState<string[]>([]);
 
   const [formData, setFormData] = useState({
     sectionName: 'General',
@@ -59,6 +70,8 @@ export default function BusinessScreen() {
     description: '',
     link: '',
     instructions: '',
+    categories: [] as string[],
+    images: [] as string[],
   });
 
   const loadItems = useCallback(async () => {
@@ -71,9 +84,15 @@ export default function BusinessScreen() {
     }
   }, []);
 
+  const loadCategories = useCallback(async () => {
+    const data = await businessCategoryStorage.getAll();
+    setCategories(data);
+  }, []);
+
   useEffect(() => {
     loadItems();
-  }, [loadItems]);
+    loadCategories();
+  }, [loadItems, loadCategories]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -88,6 +107,8 @@ export default function BusinessScreen() {
       description: '',
       link: '',
       instructions: '',
+      categories: [],
+      images: [],
     });
     setEditingItem(null);
   };
@@ -105,6 +126,8 @@ export default function BusinessScreen() {
       description: item.description,
       link: item.link,
       instructions: item.instructions,
+      categories: item.categories || [],
+      images: item.images || [],
     });
     setModalVisible(true);
   };
@@ -124,6 +147,31 @@ export default function BusinessScreen() {
     await loadItems();
     setModalVisible(false);
     resetForm();
+  };
+
+  const pickImage = async () => {
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permissionResult.granted) {
+      Alert.alert('Permission required', 'Permission to access media library is required!');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 1,
+    });
+
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      const newImages = [...formData.images, result.assets[0].uri];
+      setFormData({ ...formData, images: newImages });
+    }
+  };
+
+  const removeImage = (imageUri: string) => {
+    const newImages = formData.images.filter(uri => uri !== imageUri);
+    setFormData({ ...formData, images: newImages });
   };
 
   const handleDelete = (item: BusinessItem) => {
@@ -146,6 +194,130 @@ export default function BusinessScreen() {
       setNewSection('');
       setSectionModalVisible(false);
     }
+  };
+
+  const normalizeCategory = (value: string) => value.trim();
+
+  const addCategory = async () => {
+    const value = normalizeCategory(newCategoryName);
+    if (!value) {
+      Alert.alert('Error', 'Category name cannot be empty');
+      return;
+    }
+
+    if (categories.some(category => category.toLowerCase() === value.toLowerCase())) {
+      Alert.alert('Error', 'Category already exists');
+      return;
+    }
+
+    const updatedCategories = [...categories, value];
+    await businessCategoryStorage.saveAll(updatedCategories);
+    setCategories(updatedCategories);
+    setNewCategoryName('');
+  };
+
+  const startEditCategory = (category: string) => {
+    setEditingCategory(category);
+    setEditingCategoryName(category);
+  };
+
+  const saveEditedCategory = async () => {
+    if (!editingCategory) return;
+
+    const value = normalizeCategory(editingCategoryName);
+    if (!value) {
+      Alert.alert('Error', 'Category name cannot be empty');
+      return;
+    }
+
+    if (
+      categories.some(
+        category =>
+          category.toLowerCase() === value.toLowerCase() &&
+          category.toLowerCase() !== editingCategory.toLowerCase(),
+      )
+    ) {
+      Alert.alert('Error', 'Category already exists');
+      return;
+    }
+
+    const updatedCategories = categories.map(category =>
+      category === editingCategory ? value : category,
+    );
+    await businessCategoryStorage.saveAll(updatedCategories);
+    setCategories(updatedCategories);
+
+    const allItems = await businessStorage.getAll();
+    const affectedItems = allItems.filter(item => item.categories?.includes(editingCategory));
+    await Promise.all(
+      affectedItems.map(item =>
+        businessStorage.update(item.id, {
+          categories: item.categories?.map(category =>
+            category === editingCategory ? value : category,
+          ),
+        }),
+      ),
+    );
+
+    if (activeFilter === editingCategory) {
+      setActiveFilter(value);
+    }
+
+    setFormData(prev => ({
+      ...prev,
+      categories: prev.categories.map(category =>
+        category === editingCategory ? value : category,
+      ),
+    }));
+
+    setEditingCategory(null);
+    setEditingCategoryName('');
+    await loadItems();
+  };
+
+  const deleteCategory = (categoryToDelete: string) => {
+    Alert.alert(
+      'Delete Category',
+      `Delete "${categoryToDelete}"? This removes it from existing items too.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const updatedCategories = categories.filter(category => category !== categoryToDelete);
+            await businessCategoryStorage.saveAll(updatedCategories);
+            setCategories(updatedCategories);
+
+            const allItems = await businessStorage.getAll();
+            const affectedItems = allItems.filter(item => item.categories?.includes(categoryToDelete));
+            await Promise.all(
+              affectedItems.map(item =>
+                businessStorage.update(item.id, {
+                  categories: item.categories?.filter(category => category !== categoryToDelete),
+                }),
+              ),
+            );
+
+            if (activeFilter === categoryToDelete) {
+              setActiveFilter('All');
+            }
+
+            setFormData(prev => ({
+              ...prev,
+              categories: prev.categories.filter(category => category !== categoryToDelete),
+            }));
+
+            if (editingCategory === categoryToDelete) {
+              setEditingCategory(null);
+              setEditingCategoryName('');
+            }
+
+            await loadItems();
+          },
+        },
+      ],
+    );
   };
 
   const filteredItems = items.filter(item => {
@@ -304,26 +476,33 @@ export default function BusinessScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.galleryListContent}
           columnWrapperStyle={styles.galleryColumnWrapper}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[
-                styles.galleryCard,
-                { width: galleryCardWidth, backgroundColor: colors.surface, borderColor: colors.border },
-              ]}
-              onPress={() => openEditModal(item)}
-              activeOpacity={0.85}
-            >
-              <Text style={[styles.galleryTitle, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
-              <Text style={[styles.gallerySubtitle, { color: colors.textSecondary }]} numberOfLines={2}>
-                {item.description || 'No description'}
-              </Text>
-              <View style={[styles.galleryTag, { backgroundColor: colors.primary + '20' }]}>
-                <Text style={[styles.galleryTagText, { color: colors.primary }]} numberOfLines={1}>
-                  {item.sectionName}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          )}
+          renderItem={({ item }) => {
+            const uri = item.images && item.images.length > 0 ? item.images[0] : undefined;
+            return (
+              <TouchableOpacity
+                style={[
+                  styles.galleryCard,
+                  { width: galleryCardWidth, backgroundColor: colors.card, borderColor: colors.border },
+                ]}
+                onPress={() => openEditModal(item)}
+                activeOpacity={0.85}
+              >
+                {uri ? (
+                  <Image source={{ uri }} style={styles.galleryImage} resizeMode="cover" />
+                ) : (
+                  <View style={[styles.galleryPlaceholder, { backgroundColor: colors.surface }]}>
+                    <Ionicons name="briefcase-outline" size={24} color={colors.textSecondary} />
+                  </View>
+                )}
+                <View style={styles.galleryOverlay}>
+                  <Text style={styles.galleryTitle} numberOfLines={1}>{item.name}</Text>
+                  <Text style={styles.gallerySubtitle} numberOfLines={1}>
+                    {item.description || 'No description'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          }}
         />
       )}
 
@@ -402,6 +581,19 @@ export default function BusinessScreen() {
               value={formData.sectionName}
               onChange={(sectionName) => setFormData({ ...formData, sectionName })}
             />
+            <MultiSelect
+              label="Categories"
+              options={categories}
+              selected={formData.categories}
+              onChange={(categories) => setFormData({ ...formData, categories })}
+            />
+            <TouchableOpacity
+              style={[styles.manageCategoriesButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={() => setCategoriesModalVisible(true)}
+            >
+              <Ionicons name="settings-outline" size={16} color={colors.textSecondary} />
+              <Text style={[styles.manageCategoriesText, { color: colors.text }]}>Manage Categories</Text>
+            </TouchableOpacity>
             <FormInput
               label="Name *"
               placeholder="e.g., CRM Tool"
@@ -434,6 +626,26 @@ export default function BusinessScreen() {
               numberOfLines={4}
               style={styles.textArea}
             />
+            <View style={styles.imageSection}>
+              <Text style={[styles.imageSectionTitle, { color: colors.text }]}>Images</Text>
+              <View style={styles.imageGrid}>
+                {formData.images.map((imageUri, index) => (
+                  <View key={index} style={styles.imageContainer}>
+                    <Image source={{ uri: imageUri }} style={styles.imagePreview} />
+                    <TouchableOpacity
+                      style={styles.removeImageButton}
+                      onPress={() => removeImage(imageUri)}
+                    >
+                      <Ionicons name="close-circle" size={20} color="#FFFFFF" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                <TouchableOpacity style={[styles.addImageButton, { borderColor: colors.border, backgroundColor: colors.surface }]} onPress={pickImage}>
+                  <Ionicons name="add" size={24} color={colors.text} />
+                  <Text style={[styles.addImageText, { color: colors.textSecondary }]}>Add Image</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
             <View style={styles.bottomPadding} />
           </ScrollView>
         </KeyboardAvoidingView>
@@ -462,6 +674,74 @@ export default function BusinessScreen() {
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Categories Modal */}
+      <Modal visible={categoriesModalVisible} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={[styles.optionSheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Manage Categories</Text>
+
+            <View style={[styles.categoryInputRow, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+              <TextInput
+                value={newCategoryName}
+                onChangeText={setNewCategoryName}
+                placeholder="New category"
+                placeholderTextColor={colors.textSecondary}
+                style={[styles.categoryInput, { color: colors.text }]}
+              />
+              <TouchableOpacity
+                style={[styles.categoryActionButton, { backgroundColor: colors.primary }]}
+                onPress={addCategory}
+              >
+                <Ionicons name="add" size={16} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.categoriesList}>
+              {categories.map(category => (
+                <View key={category} style={[styles.categoryRow, { borderBottomColor: colors.border }]}>
+                  {editingCategory === category ? (
+                    <TextInput
+                      value={editingCategoryName}
+                      onChangeText={setEditingCategoryName}
+                      style={[styles.categoryEditInput, { color: colors.text, borderColor: colors.border }]}
+                    />
+                  ) : (
+                    <Text style={[styles.optionText, { color: colors.text }]}>{category}</Text>
+                  )}
+
+                  <View style={styles.categoryActions}>
+                    {editingCategory === category ? (
+                      <TouchableOpacity onPress={saveEditedCategory} style={styles.categoryIconButton}>
+                        <Ionicons name="checkmark" size={18} color={colors.success} />
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity onPress={() => startEditCategory(category)} style={styles.categoryIconButton}>
+                        <Ionicons name="create-outline" size={17} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity onPress={() => deleteCategory(category)} style={styles.categoryIconButton}>
+                      <Ionicons name="trash-outline" size={17} color={colors.danger} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              onPress={() => {
+                setCategoriesModalVisible(false);
+                setEditingCategory(null);
+                setEditingCategoryName('');
+                setNewCategoryName('');
+              }}
+              style={styles.optionClose}
+            >
+              <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -692,5 +972,132 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  manageCategoriesButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  manageCategoriesText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  categoryInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 12,
+  },
+  categoryInput: {
+    flex: 1,
+    fontSize: 14,
+  },
+  categoryActionButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  categoriesList: {
+    maxHeight: 200,
+  },
+  categoryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  categoryEditInput: {
+    flex: 1,
+    fontSize: 14,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  categoryActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  categoryIconButton: {
+    padding: 6,
+  },
+  galleryPlaceholder: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  galleryImage: {
+    width: '100%',
+    height: '100%',
+  },
+  galleryOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  imageSection: {
+    marginTop: 16,
+  },
+  imageSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  imageGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  imageContainer: {
+    position: 'relative',
+    width: 80,
+    height: 80,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  imagePreview: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 12,
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 10,
+    padding: 2,
+  },
+  addImageButton: {
+    width: 80,
+    height: 80,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  addImageText: {
+    fontSize: 10,
+    textAlign: 'center',
   },
 });

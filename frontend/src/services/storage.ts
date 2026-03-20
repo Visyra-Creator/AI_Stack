@@ -12,6 +12,7 @@ const STORAGE_KEYS = {
   LEAD_GENERATION: 'lead_generation',
   LEAD_GENERATION_CATEGORIES: 'lead_generation_categories',
   BUSINESS: 'business',
+  BUSINESS_CATEGORIES: 'business_categories',
   CONTENT_CREATION: 'content_creation',
   WEBSITE: 'website',
   MARKETING: 'marketing',
@@ -142,6 +143,9 @@ export interface BusinessItem {
   description: string;
   link: string;
   instructions: string;
+  categories?: string[];
+  images?: string[];
+  files?: string[];
   createdAt: number;
 }
 
@@ -325,6 +329,18 @@ export const businessStorage = {
   add: (item: Omit<BusinessItem, 'id' | 'createdAt'>) => addItem<BusinessItem>(STORAGE_KEYS.BUSINESS, item),
   update: (id: string, updates: Partial<BusinessItem>) => updateItem<BusinessItem>(STORAGE_KEYS.BUSINESS, id, updates),
   delete: (id: string) => deleteItem<BusinessItem>(STORAGE_KEYS.BUSINESS, id),
+};
+
+export const businessCategoryStorage = {
+  getAll: async (): Promise<string[]> => {
+    const categories = await getItems<string>(STORAGE_KEYS.BUSINESS_CATEGORIES);
+    if (categories.length === 0) {
+      await saveItems(STORAGE_KEYS.BUSINESS_CATEGORIES, ['General', 'Marketing', 'Finance', 'Operations', 'Sales', 'HR', 'IT', 'Other']);
+      return ['General', 'Marketing', 'Finance', 'Operations', 'Sales', 'HR', 'IT', 'Other'];
+    }
+    return categories;
+  },
+  saveAll: (categories: string[]) => saveItems(STORAGE_KEYS.BUSINESS_CATEGORIES, categories),
 };
 
 // Content Creation
