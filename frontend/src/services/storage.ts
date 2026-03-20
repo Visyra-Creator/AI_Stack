@@ -68,6 +68,8 @@ export interface ToolItem {
   link: string;
   description: string;
   instructions: string;
+  image?: string;
+  isFavorite?: boolean;
   createdAt: number;
 }
 
@@ -78,6 +80,7 @@ export interface TutorialItem {
   instructions: string;
   videoLink?: string;
   files: string[];
+  isFavorite?: boolean;
   createdAt: number;
 }
 

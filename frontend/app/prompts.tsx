@@ -15,6 +15,7 @@ import {
   useWindowDimensions,
   FlatList,
   GestureResponderEvent,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -388,6 +389,40 @@ export default function PromptsScreen() {
     return raw.split('\n')[0].trim();
   };
 
+  const openExternalLink = async (url: string) => {
+    try {
+      const canOpen = await Linking.canOpenURL(url);
+      if (!canOpen) {
+        Alert.alert('Unable to open link', 'No app is available to open this link.');
+        return;
+      }
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Unable to open link', 'Something went wrong while opening this link.');
+    }
+  };
+
+  const renderLinkedText = (value: string) => {
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    return (
+      <Text style={[styles.detailsValue, { color: colors.text }]}>
+        {value.split(urlRegex).map((part, index) => (
+          /^https?:\/\/[^\s]+$/i.test(part) ? (
+            <Text
+              key={`${part}-${index}`}
+              style={[styles.detailsValue, { color: colors.primary, textDecorationLine: 'underline' }]}
+              onPress={() => openExternalLink(part)}
+            >
+              {part}
+            </Text>
+          ) : (
+            <Text key={`${part}-${index}`}>{part}</Text>
+          )
+        ))}
+      </Text>
+    );
+  };
+
   const getPrimaryPromptImage = (item: PromptItem) => item.generatedImage || item.inputImage;
 
   return (
@@ -626,13 +661,13 @@ export default function PromptsScreen() {
               {!!selectedItem.description?.trim() && (
                 <View style={styles.detailsSection}>
                   <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>What It Does</Text>
-                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.description}</Text>
+                  {renderLinkedText(selectedItem.description)}
                 </View>
               )}
 
               <View style={styles.detailsSection}>
                 <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Prompt</Text>
-                <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.prompt}</Text>
+                {renderLinkedText(selectedItem.prompt)}
               </View>
 
               {(selectedItem.inputImage || selectedItem.generatedImage) && (

@@ -434,6 +434,40 @@ export default function AIStackScreen() {
     }
   };
 
+  const openExternalLink = async (url: string) => {
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (!supported) {
+        Alert.alert('Unable to open link', 'No app available to open this link.');
+        return;
+      }
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Unable to open link', 'Something went wrong while opening this link.');
+    }
+  };
+
+  const renderLinkedText = (value: string) => {
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    return (
+      <Text style={[styles.detailsValue, { color: colors.text }]}>
+        {value.split(urlRegex).map((part, index) => (
+          /^https?:\/\/[^\s]+$/i.test(part) ? (
+            <Text
+              key={`${part}-${index}`}
+              style={[styles.detailsValue, { color: colors.primary, textDecorationLine: 'underline' }]}
+              onPress={() => openExternalLink(part)}
+            >
+              {part}
+            </Text>
+          ) : (
+            <Text key={`${part}-${index}`}>{part}</Text>
+          )
+        ))}
+      </Text>
+    );
+  };
+
   const openFilesPicker = (files: string[]) => {
     if (files.length === 1) {
       openFile(files[0]);
@@ -730,42 +764,42 @@ export default function AIStackScreen() {
               {!!selectedItem.description?.trim() && (
                 <View style={styles.detailsSection}>
                   <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Description</Text>
-                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.description}</Text>
+                  {renderLinkedText(selectedItem.description)}
                 </View>
               )}
 
               {!!selectedItem.usedFor?.trim() && (
                 <View style={styles.detailsSection}>
                   <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>What It Is Used For</Text>
-                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.usedFor}</Text>
+                  {renderLinkedText(selectedItem.usedFor)}
                 </View>
               )}
 
               {!!selectedItem.keyFeatures?.trim() && (
                 <View style={styles.detailsSection}>
                   <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Key Features</Text>
-                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.keyFeatures}</Text>
+                  {renderLinkedText(selectedItem.keyFeatures)}
                 </View>
               )}
 
               {!!selectedItem.bestFor?.trim() && (
                 <View style={styles.detailsSection}>
                   <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Best For</Text>
-                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.bestFor}</Text>
+                  {renderLinkedText(selectedItem.bestFor)}
                 </View>
               )}
 
               {!!selectedItem.guides?.trim() && (
                 <View style={styles.detailsSection}>
                   <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Guides/Documents</Text>
-                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.guides}</Text>
+                  {renderLinkedText(selectedItem.guides)}
                 </View>
               )}
 
               {!!selectedItem.url?.trim() && (
                 <View style={styles.detailsSection}>
                   <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>URL</Text>
-                  <TouchableOpacity onPress={() => Linking.openURL(selectedItem.url)}>
+                  <TouchableOpacity onPress={() => openExternalLink(selectedItem.url)}>
                     <Text style={[styles.detailsLink, { color: colors.primary }]} numberOfLines={2}>
                       {selectedItem.url}
                     </Text>
@@ -815,7 +849,7 @@ export default function AIStackScreen() {
               {!!selectedItem.instructions?.trim() && (
                 <View style={styles.detailsSection}>
                   <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Instructions</Text>
-                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.instructions}</Text>
+                  {renderLinkedText(selectedItem.instructions)}
                 </View>
               )}
 
