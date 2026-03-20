@@ -10,6 +10,7 @@ const STORAGE_KEYS = {
   OPEN_SOURCE: 'open_source',
   OPEN_SOURCE_CATEGORIES: 'open_source_categories',
   LEAD_GENERATION: 'lead_generation',
+  LEAD_GENERATION_CATEGORIES: 'lead_generation_categories',
   BUSINESS: 'business',
   CONTENT_CREATION: 'content_creation',
   WEBSITE: 'website',
@@ -40,6 +41,18 @@ const DEFAULT_OPEN_SOURCE_CATEGORIES = [
   'Automation',
   'Graphics',
   'Audio/Video',
+  'Other',
+];
+
+const DEFAULT_LEAD_GENERATION_CATEGORIES = [
+  'LinkedIn',
+  'Email',
+  'Cold Calling',
+  'SEO',
+  'PPC',
+  'Social Media',
+  'Content Marketing',
+  'Affiliate',
   'Other',
 ];
 
@@ -115,6 +128,10 @@ export interface LeadGenerationItem {
   instructions: string;
   link: string;
   videoLink?: string;
+  category: string;
+  isFavorite?: boolean;
+  images?: string[];
+  files?: string[];
   createdAt: number;
 }
 
@@ -288,6 +305,18 @@ export const leadGenerationStorage = {
   add: (item: Omit<LeadGenerationItem, 'id' | 'createdAt'>) => addItem<LeadGenerationItem>(STORAGE_KEYS.LEAD_GENERATION, item),
   update: (id: string, updates: Partial<LeadGenerationItem>) => updateItem<LeadGenerationItem>(STORAGE_KEYS.LEAD_GENERATION, id, updates),
   delete: (id: string) => deleteItem<LeadGenerationItem>(STORAGE_KEYS.LEAD_GENERATION, id),
+};
+
+export const leadGenerationCategoryStorage = {
+  getAll: async (): Promise<string[]> => {
+    const categories = await getItems<string>(STORAGE_KEYS.LEAD_GENERATION_CATEGORIES);
+    if (categories.length === 0) {
+      await saveItems(STORAGE_KEYS.LEAD_GENERATION_CATEGORIES, DEFAULT_LEAD_GENERATION_CATEGORIES);
+      return DEFAULT_LEAD_GENERATION_CATEGORIES;
+    }
+    return categories;
+  },
+  saveAll: (categories: string[]) => saveItems(STORAGE_KEYS.LEAD_GENERATION_CATEGORIES, categories),
 };
 
 // Business
