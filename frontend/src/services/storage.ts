@@ -14,6 +14,7 @@ const STORAGE_KEYS = {
   BUSINESS: 'business',
   BUSINESS_CATEGORIES: 'business_categories',
   CONTENT_CREATION: 'content_creation',
+  CONTENT_CREATION_CATEGORIES: 'content_creation_categories',
   WEBSITE: 'website',
   MARKETING: 'marketing',
 };
@@ -160,6 +161,8 @@ export interface ContentCreationItem {
   instructions: string;
   videoLink?: string;
   videoFile?: string;
+  categories?: string[];
+  isFavorite?: boolean;
   createdAt: number;
 }
 
@@ -352,6 +355,19 @@ export const contentCreationStorage = {
   add: (item: Omit<ContentCreationItem, 'id' | 'createdAt'>) => addItem<ContentCreationItem>(STORAGE_KEYS.CONTENT_CREATION, item),
   update: (id: string, updates: Partial<ContentCreationItem>) => updateItem<ContentCreationItem>(STORAGE_KEYS.CONTENT_CREATION, id, updates),
   delete: (id: string) => deleteItem<ContentCreationItem>(STORAGE_KEYS.CONTENT_CREATION, id),
+};
+
+export const contentCreationCategoryStorage = {
+  getAll: async (): Promise<string[]> => {
+    const categories = await getItems<string>(STORAGE_KEYS.CONTENT_CREATION_CATEGORIES);
+    if (categories.length === 0) {
+      const defaultCategories = ['Video Editing', 'Graphic Design', 'Writing', 'Audio Editing', 'Social Media', 'Other'];
+      await saveItems(STORAGE_KEYS.CONTENT_CREATION_CATEGORIES, defaultCategories);
+      return defaultCategories;
+    }
+    return categories;
+  },
+  saveAll: (categories: string[]) => saveItems(STORAGE_KEYS.CONTENT_CREATION_CATEGORIES, categories),
 };
 
 // Website
