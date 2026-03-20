@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -31,6 +31,7 @@ export default function CategoryScreen() {
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const lastOpenAtRef = useRef(0);
 
   const fetchItems = async () => {
     try {
@@ -78,7 +79,13 @@ export default function CategoryScreen() {
   };
 
   const handleItemPress = (item: Item) => {
-    router.push({
+    const now = Date.now();
+    if (now - lastOpenAtRef.current < 450) {
+      return;
+    }
+    lastOpenAtRef.current = now;
+
+    router.navigate({
       pathname: '/item/[id]',
       params: { 
         id: item.id,
@@ -88,7 +95,7 @@ export default function CategoryScreen() {
   };
 
   const handleAddPress = () => {
-    router.push({
+    router.navigate({
       pathname: '/item/select-category',
       params: { initialCategory: name },
     });

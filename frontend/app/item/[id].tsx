@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { parseAddContentMeta } from '../../data/add-content';
-import { deleteItem, getItemById } from '../../services/api';
+import { deleteItem, getItemById, updateItem } from '../../services/api';
 
 interface Item {
   id: string;
@@ -28,37 +28,79 @@ interface Item {
   updatedAt: string;
 }
 
+type LearningReturnRoute = '/learning' | '/learning/tutorials' | '/learning/guides' | '/learning/miscellaneous';
+const inflightItemRequests = new Map<string, Promise<Item>>();
+
 export default function ItemDetailScreen() {
-  const { id, category } = useLocalSearchParams<{ id: string; category: string }>();
+  const { id, category, returnTo } = useLocalSearchParams<{
+    id: string;
+    category: string;
+    returnTo?: string;
+  }>();
   const router = useRouter();
   const [item, setItem] = useState<Item | null>(null);
   const [loading, setLoading] = useState(true);
+  const [updatingFavorite, setUpdatingFavorite] = useState(false);
+  const lastRequestedIdRef = useRef<string | null>(null);
+
+  const normalizedReturnTo: LearningReturnRoute | undefined =
+    returnTo === '/learning' || returnTo === '/learning/tutorials' || returnTo === '/learning/guides' || returnTo === '/learning/miscellaneous'
+      ? returnTo
+      : undefined;
 
   const metadata = parseAddContentMeta(item?.notes);
+  const isFavorite = Boolean(metadata?.isFavorite);
 
   useEffect(() => {
+    if (!id) {
+      return;
+    }
+
+    const itemId = String(id);
+    if (lastRequestedIdRef.current === itemId) {
+      return;
+    }
+
+    lastRequestedIdRef.current = itemId;
     fetchItem();
   }, [id]);
 
   const fetchItem = async () => {
     try {
-      const data = await getItemById(id);
+      const itemId = String(id);
+      let request = inflightItemRequests.get(itemId);
+
+      if (!request) {
+        request = getItemById(itemId) as Promise<Item>;
+        inflightItemRequests.set(itemId, request);
+      }
+
+      const data = await request;
       setItem(data);
     } catch (error) {
       console.error('Error fetching item:', error);
       Alert.alert('Error', 'Failed to load item');
       router.back();
     } finally {
+      inflightItemRequests.delete(String(id));
       setLoading(false);
     }
   };
 
   const handleEdit = () => {
-    router.push({
+    const nextReturnTo: LearningReturnRoute | undefined =
+      normalizedReturnTo
+        ? normalizedReturnTo
+        : category === 'Learning'
+          ? '/learning'
+          : undefined;
+
+    router.navigate({
       pathname: '/item/edit',
       params: { 
         id: item?.id,
         category: category,
+        returnTo: nextReturnTo,
       }
     });
   };
@@ -75,6 +117,10 @@ export default function ItemDetailScreen() {
           onPress: async () => {
             try {
               await deleteItem(id);
+              if (normalizedReturnTo) {
+                router.back();
+                return;
+              }
               router.back();
             } catch (error) {
               console.error('Error deleting item:', error);
@@ -84,6 +130,15 @@ export default function ItemDetailScreen() {
         },
       ]
     );
+  };
+
+  const handleBack = () => {
+    if (normalizedReturnTo) {
+      router.back();
+      return;
+    }
+
+    router.back();
   };
 
   const handleOpenLink = async (rawLink: string) => {
@@ -108,7 +163,7 @@ export default function ItemDetailScreen() {
       return;
     }
 
-    router.push({
+    router.navigate({
       pathname: '/item/file-viewer',
       params: {
         uri: encodeURIComponent(metadata.fileUri),
@@ -116,6 +171,58 @@ export default function ItemDetailScreen() {
         mimeType: encodeURIComponent(metadata.fileMimeType ?? ''),
       },
     });
+  };
+
+  const handleToggleFavorite = async () => {
+    if (!item || updatingFavorite) {
+      return;
+    }
+
+    const nextFavorite = !isFavorite;
+
+    if (!metadata && item.notes) {
+      Alert.alert('Unavailable', 'Favorite toggle is supported for structured content only.');
+      return;
+    }
+
+    const nextMeta = metadata
+      ? { ...metadata, isFavorite: nextFavorite }
+      : { subcategory: 'General', isFavorite: nextFavorite };
+
+    if (!nextFavorite) {
+      delete (nextMeta as { isFavorite?: boolean }).isFavorite;
+    }
+
+    const nextNotes = JSON.stringify(nextMeta);
+
+    setUpdatingFavorite(true);
+    try {
+      await updateItem(item.id, {
+        category: item.category,
+        title: item.title,
+        description: item.description || '',
+        notes: nextNotes,
+        image: item.image || null,
+        url: item.url || null,
+      });
+
+      setItem((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          notes: nextNotes,
+          updatedAt: new Date().toISOString(),
+        };
+      });
+    } catch (error) {
+      console.error('Error toggling favorite:', error);
+      Alert.alert('Error', 'Failed to update favorite status.');
+    } finally {
+      setUpdatingFavorite(false);
+    }
   };
 
   if (loading) {
@@ -134,11 +241,22 @@ export default function ItemDetailScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Details</Text>
         <View style={styles.headerActions}>
+          <TouchableOpacity onPress={handleToggleFavorite} style={styles.headerButton} disabled={updatingFavorite}>
+            {updatingFavorite ? (
+              <ActivityIndicator size="small" color="#FEC84B" />
+            ) : (
+              <Ionicons
+                name={isFavorite ? 'star' : 'star-outline'}
+                size={22}
+                color={isFavorite ? '#FEC84B' : '#FFFFFF'}
+              />
+            )}
+          </TouchableOpacity>
           <TouchableOpacity onPress={handleEdit} style={styles.headerButton}>
             <Ionicons name="create-outline" size={24} color="#FFFFFF" />
           </TouchableOpacity>
@@ -160,6 +278,23 @@ export default function ItemDetailScreen() {
         <View style={styles.section}>
           <Text style={styles.label}>Title</Text>
           <Text style={styles.value}>{item.title}</Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.label}>Favorite</Text>
+          <TouchableOpacity
+            style={[styles.favoriteBadge, updatingFavorite && styles.favoriteBadgeDisabled]}
+            onPress={handleToggleFavorite}
+            activeOpacity={0.85}
+            disabled={updatingFavorite}
+          >
+            {updatingFavorite ? (
+              <ActivityIndicator size="small" color="#FEC84B" />
+            ) : (
+              <Ionicons name={isFavorite ? 'star' : 'star-outline'} size={14} color={isFavorite ? '#FEC84B' : '#9BA5B8'} />
+            )}
+            <Text style={styles.favoriteText}>{isFavorite ? 'Favorite' : 'Normal'}</Text>
+          </TouchableOpacity>
         </View>
 
         {item.description ? (
@@ -321,6 +456,26 @@ const styles = StyleSheet.create({
     height: 190,
     borderRadius: 12,
     backgroundColor: '#151A22',
+  },
+  favoriteBadge: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#2A3241',
+    backgroundColor: '#151A22',
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  favoriteBadgeDisabled: {
+    opacity: 0.7,
+  },
+  favoriteText: {
+    color: '#D6DEED',
+    fontSize: 12,
+    fontWeight: '700',
   },
   fileButton: {
     borderWidth: 1,

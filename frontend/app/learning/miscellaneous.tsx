@@ -20,16 +20,13 @@ type SortOption = 'newest' | 'oldest' | 'title';
 type FilterOption = 'all' | 'favorites';
 type ViewMode = 'normal' | 'gallery';
 
-interface GuideCard {
+interface MiscCard {
   id: string;
   title: string;
   description: string;
   itemId?: string;
   imageUri?: string;
   isFavorite?: boolean;
-  notes?: string;
-  category?: string;
-  url?: string;
 }
 
 interface BackendItem {
@@ -42,30 +39,34 @@ interface BackendItem {
   url?: string;
 }
 
-export default function GuidesScreen() {
+export default function MiscellaneousScreen() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('newest');
   const [filterBy, setFilterBy] = useState<FilterOption>('all');
   const [viewMode, setViewMode] = useState<ViewMode>('normal');
   const [openDropdown, setOpenDropdown] = useState<'sort' | 'view' | 'filter' | null>(null);
-  const [guides, setGuides] = useState<GuideCard[]>([]);
+  const [items, setItems] = useState<MiscCard[]>([]);
   const lastOpenAtRef = useRef(0);
 
-
-  const loadGuides = useCallback(async () => {
+  const loadItems = useCallback(async () => {
     try {
-      const items: BackendItem[] = await getItemsByCategory('Learning');
+      const response: BackendItem[] = await getItemsByCategory('Learning');
 
-      const mapped = items
+      const mapped = response
         .filter((item) => {
           const metadata = parseAddContentMeta(item.notes);
           const subcategories = metadata?.subcategories ?? (metadata?.subcategory ? [metadata.subcategory] : []);
+
           if (subcategories.length === 0) {
-            return false;
+            return true;
           }
 
-          return subcategories.some((value) => value.toLowerCase().includes('guide'));
+          const hasTutorial = subcategories.some((value) => value.toLowerCase().includes('tutorial'));
+          const hasGuide = subcategories.some((value) => value.toLowerCase().includes('guide'));
+          const hasMisc = subcategories.some((value) => value.toLowerCase().includes('misc'));
+
+          return hasMisc || (!hasTutorial && !hasGuide);
         })
         .map((item) => {
           const metadata = parseAddContentMeta(item.notes);
@@ -73,19 +74,16 @@ export default function GuidesScreen() {
           return {
             id: `uploaded-${item.id}`,
             title: item.title,
-            description: item.description || 'Uploaded guide content',
+            description: item.description || 'Uploaded miscellaneous content',
             itemId: item.id,
             imageUri: item.image || metadata?.imageUri,
             isFavorite: Boolean(metadata?.isFavorite),
-            notes: item.notes,
-            category: item.category,
-            url: item.url,
           };
         });
 
-      setGuides(mapped);
+      setItems(mapped);
     } catch (error) {
-      console.error('Failed to load uploaded guides:', error);
+      console.error('Failed to load uploaded miscellaneous items:', error);
     }
   }, []);
 
@@ -94,29 +92,29 @@ export default function GuidesScreen() {
       setSearchQuery('');
       setFilterBy('all');
       setOpenDropdown(null);
-      loadGuides();
-    }, [loadGuides])
+      loadItems();
+    }, [loadItems])
   );
 
-  const filteredGuides = useMemo(() => {
+  const filteredItems = useMemo(() => {
     const normalized = searchQuery.trim().toLowerCase();
 
-    const sourceFiltered = guides.filter((guide) => {
+    const sourceFiltered = items.filter((item) => {
       if (filterBy === 'favorites') {
-        return Boolean(guide.isFavorite);
+        return Boolean(item.isFavorite);
       }
 
       return true;
     });
 
-    const searched = sourceFiltered.filter((guide) => {
+    const searched = sourceFiltered.filter((item) => {
       if (!normalized) {
         return true;
       }
 
       return (
-        guide.title.toLowerCase().includes(normalized) ||
-        guide.description.toLowerCase().includes(normalized)
+        item.title.toLowerCase().includes(normalized) ||
+        item.description.toLowerCase().includes(normalized)
       );
     });
 
@@ -129,7 +127,7 @@ export default function GuidesScreen() {
     }
 
     return searched;
-  }, [filterBy, guides, searchQuery, sortBy]);
+  }, [filterBy, items, searchQuery, sortBy]);
 
   const filterOptions: { value: FilterOption; label: string }[] = [
     { value: 'all', label: 'All' },
@@ -147,7 +145,7 @@ export default function GuidesScreen() {
     setOpenDropdown(null);
   };
 
-  const handleEdit = (card: GuideCard) => {
+  const handleEdit = (card: MiscCard) => {
     if (!card.itemId) {
       return;
     }
@@ -157,35 +155,36 @@ export default function GuidesScreen() {
       params: {
         id: card.itemId,
         category: 'Learning',
-        returnTo: '/learning/guides',
+        returnTo: '/learning/miscellaneous',
       },
     });
   };
 
-  const handleDelete = (card: GuideCard) => {
-    if (!card.itemId) {
+  const handleDelete = (card: MiscCard) => {
+    const itemId = card.itemId;
+    if (!itemId) {
       return;
     }
 
-    Alert.alert('Delete Guide', 'Are you sure you want to delete this guide?', [
+    Alert.alert('Delete Content', 'Are you sure you want to delete this content?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
           try {
-            await deleteItem(card.itemId!);
-            loadGuides();
+            await deleteItem(itemId);
+            loadItems();
           } catch (error) {
-            console.error('Failed to delete guide:', error);
-            Alert.alert('Error', 'Failed to delete guide.');
+            console.error('Failed to delete content:', error);
+            Alert.alert('Error', 'Failed to delete content.');
           }
         },
       },
     ]);
   };
 
-  const handleToggleFavorite = async (card: GuideCard) => {
+  const handleToggleFavorite = async (card: MiscCard) => {
     if (!card.itemId) {
       return;
     }
@@ -195,7 +194,7 @@ export default function GuidesScreen() {
       const existingMeta = parseAddContentMeta(existing.notes);
       const nextFavorite = !Boolean(existingMeta?.isFavorite);
       const nextMeta = {
-        ...(existingMeta ?? { subcategory: 'Guides' }),
+        ...(existingMeta ?? { subcategory: 'Miscellaneous' }),
         isFavorite: nextFavorite,
       };
 
@@ -212,13 +211,13 @@ export default function GuidesScreen() {
         url: existing.url || null,
       });
 
-      setGuides((current) =>
+      setItems((current) =>
         current.map((item) =>
           item.itemId === card.itemId ? { ...item, isFavorite: nextFavorite } : item
         )
       );
     } catch (error) {
-      console.error('Failed to update guide favorite:', error);
+      console.error('Failed to update favorite:', error);
       Alert.alert('Error', 'Failed to update favorite.');
     }
   };
@@ -234,8 +233,8 @@ export default function GuidesScreen() {
                 pathname: '/item/select-category',
                 params: {
                   initialCategory: 'Learning',
-                  subcategory: 'Guides',
-                  returnTo: '/learning/guides',
+                  subcategory: 'Miscellaneous',
+                  returnTo: '/learning/miscellaneous',
                 },
               })
             }
@@ -247,7 +246,7 @@ export default function GuidesScreen() {
 
           <TextInput
             style={styles.searchInput}
-            placeholder="Search guides"
+            placeholder="Search content"
             placeholderTextColor="#6F7888"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -381,13 +380,13 @@ export default function GuidesScreen() {
 
         <FlatList
           key={viewMode}
-          data={filteredGuides}
+          data={filteredItems}
           numColumns={viewMode === 'gallery' ? 3 : 1}
           columnWrapperStyle={viewMode === 'gallery' ? styles.galleryRow : undefined}
           keyExtractor={(item) => item.id}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.listContent}
-          ListEmptyComponent={<Text style={styles.emptyText}>No guides found.</Text>}
+          ListEmptyComponent={<Text style={styles.emptyText}>No miscellaneous content found.</Text>}
           renderItem={({ item }) => (
             <TouchableOpacity
               style={viewMode === 'gallery' ? styles.galleryCard : styles.card}
@@ -407,7 +406,7 @@ export default function GuidesScreen() {
                   params: {
                     id: item.itemId,
                     category: 'Learning',
-                    returnTo: '/learning/guides',
+                    returnTo: '/learning/miscellaneous',
                   },
                 });
               }}
@@ -548,21 +547,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#12161F',
   },
-  iconButtonActiveTeal: {
-    borderColor: '#37D6B0',
-    backgroundColor: '#143329',
+  iconButtonActive: {
+    borderColor: '#8A58E9',
+    backgroundColor: '#281B44',
   },
   iconButtonActiveBlue: {
     borderColor: '#3A7AFE',
     backgroundColor: '#1A2440',
   },
-  iconButtonActive: {
-    borderColor: '#8A58E9',
-    backgroundColor: '#281B44',
-  },
   iconButtonActiveGold: {
     borderColor: '#FEC84B',
     backgroundColor: '#31260F',
+  },
+  iconButtonActiveTeal: {
+    borderColor: '#37D6B0',
+    backgroundColor: '#143329',
   },
   dropdownMenu: {
     backgroundColor: '#151A22',
@@ -623,17 +622,17 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 10,
   },
-  cardTitle: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
+  },
+  cardTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 4,
   },
   cardDescription: {
     color: '#9BA5B8',
@@ -695,6 +694,21 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     marginBottom: 8,
   },
+  galleryActions: {
+    marginTop: 'auto',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  galleryActionButton: {
+    flex: 1,
+    height: 30,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2D3646',
+    backgroundColor: '#12161F',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   favoriteTag: {
     alignSelf: 'flex-start',
     marginBottom: 6,
@@ -719,21 +733,6 @@ const styles = StyleSheet.create({
   },
   normalTagText: {
     color: '#A5B1C6',
-  },
-  galleryActions: {
-    marginTop: 'auto',
-    flexDirection: 'row',
-    gap: 6,
-  },
-  galleryActionButton: {
-    flex: 1,
-    height: 30,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#2D3646',
-    backgroundColor: '#12161F',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });
 

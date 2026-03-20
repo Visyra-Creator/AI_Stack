@@ -17,6 +17,25 @@ import { AddContentCategory, addContentCategories, isAddContentCategory } from '
 import { categories } from '../../data/categories';
 
 const CATEGORY_STORAGE_KEY = 'aikeeper.category-selection.v1';
+const TUTORIALS_CATEGORY_STORAGE_KEY = 'aikeeper.category-selection.tutorials.v1';
+const GUIDES_CATEGORY_STORAGE_KEY = 'aikeeper.category-selection.guides.v1';
+const MISC_CATEGORY_STORAGE_KEY = 'aikeeper.category-selection.miscellaneous.v1';
+
+function getCategoryStorageKey(returnTo?: string) {
+  if (returnTo === '/learning/tutorials') {
+    return TUTORIALS_CATEGORY_STORAGE_KEY;
+  }
+
+  if (returnTo === '/learning/guides') {
+    return GUIDES_CATEGORY_STORAGE_KEY;
+  }
+
+  if (returnTo === '/learning/miscellaneous') {
+    return MISC_CATEGORY_STORAGE_KEY;
+  }
+
+  return CATEGORY_STORAGE_KEY;
+}
 
 const defaultCategoryLabels: Record<string, string> = addContentCategories.reduce<Record<string, string>>(
   (acc, item) => {
@@ -35,8 +54,17 @@ const defaultCategoryDescriptions: Record<string, string> = categories.reduce<Re
 );
 
 export default function CategorySelectScreen() {
-  const { initialCategory } = useLocalSearchParams<{ initialCategory?: string }>();
+  const { initialCategory, returnTo, subcategory } = useLocalSearchParams<{
+    initialCategory?: string;
+    returnTo?: string;
+    subcategory?: string;
+  }>();
   const router = useRouter();
+  const normalizedReturnTo =
+    returnTo === '/learning/tutorials' || returnTo === '/learning/guides' || returnTo === '/learning/miscellaneous'
+      ? returnTo
+      : undefined;
+  const storageKey = getCategoryStorageKey(normalizedReturnTo);
   const preselectedCategory = useMemo(
     () => (initialCategory && isAddContentCategory(initialCategory) ? initialCategory : undefined),
     [initialCategory]
@@ -59,7 +87,7 @@ export default function CategorySelectScreen() {
   useEffect(() => {
     const hydrate = async () => {
       try {
-        const raw = await AsyncStorage.getItem(CATEGORY_STORAGE_KEY);
+        const raw = await AsyncStorage.getItem(storageKey);
         if (!raw) {
           return;
         }
@@ -87,13 +115,13 @@ export default function CategorySelectScreen() {
     };
 
     hydrate();
-  }, []);
+  }, [storageKey]);
 
   useEffect(() => {
     const persist = async () => {
       try {
         await AsyncStorage.setItem(
-          CATEGORY_STORAGE_KEY,
+          storageKey,
           JSON.stringify({
             visibleCategories,
             categoryLabels,
@@ -106,7 +134,7 @@ export default function CategorySelectScreen() {
     };
 
     persist();
-  }, [visibleCategories, categoryLabels, categoryDescriptions]);
+  }, [visibleCategories, categoryLabels, categoryDescriptions, storageKey]);
 
   useEffect(() => {
     if (selectedCategory && !visibleCategories.includes(selectedCategory)) {
@@ -172,11 +200,14 @@ export default function CategorySelectScreen() {
       return;
     }
 
-    const categoryValue = categoryLabels[selectedCategory] ?? selectedCategory;
-
-    router.push({
+    router.replace({
       pathname: '/item/add',
-      params: { category: categoryValue },
+      params: {
+        category: selectedCategory,
+        categoryLabel: categoryLabels[selectedCategory] ?? selectedCategory,
+        returnTo,
+        subcategory,
+      },
     });
   };
 

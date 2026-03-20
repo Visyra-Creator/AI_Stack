@@ -17,11 +17,11 @@ export default function Index() {
 
   const handleCategoryPress = (category: DashboardCategory) => {
     if (category.id === 'learning') {
-      router.push('/learning');
+      router.navigate('/learning');
       return;
     }
 
-    router.push({
+    router.navigate({
       pathname: '/category/[name]',
       params: { name: category.title }
     });
@@ -37,7 +37,7 @@ export default function Index() {
       return;
     }
 
-    router.push(actionRoute as never);
+    router.navigate(actionRoute as never);
   };
 
   return (

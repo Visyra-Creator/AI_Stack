@@ -26,6 +26,8 @@ import {
 } from '../../data/add-content';
 import { getItemById, updateItem } from '../../services/api';
 
+type LearningReturnRoute = '/learning' | '/learning/tutorials' | '/learning/guides' | '/learning/miscellaneous';
+
 interface Item {
   id: string;
   category: string;
@@ -37,13 +39,22 @@ interface Item {
 }
 
 export default function EditItemScreen() {
-  const { id, category } = useLocalSearchParams<{ id: string; category: string }>();
+  const { id, category, returnTo } = useLocalSearchParams<{
+    id: string;
+    category: string;
+    returnTo?: string;
+  }>();
   const router = useRouter();
+  const normalizedReturnTo: LearningReturnRoute | undefined =
+    returnTo === '/learning' || returnTo === '/learning/tutorials' || returnTo === '/learning/guides' || returnTo === '/learning/miscellaneous'
+      ? returnTo
+      : undefined;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [currentCategory, setCurrentCategory] = useState(category ?? '');
   const [heading, setHeading] = useState('');
   const [subcategory, setSubcategory] = useState('');
+  const [isFavorite, setIsFavorite] = useState(false);
   const [description, setDescription] = useState('');
   const [legacyNotes, setLegacyNotes] = useState('');
   const [externalLink, setExternalLink] = useState('');
@@ -75,6 +86,7 @@ export default function EditItemScreen() {
       setWebsiteLink(data.url || '');
       setImageUri(parsedMeta?.imageUri || data.image || '');
       setExternalLink(parsedMeta?.externalLink || '');
+      setIsFavorite(Boolean(parsedMeta?.isFavorite));
 
       if (parsedMeta?.fileUri) {
         setUploadedFile({
@@ -124,6 +136,15 @@ export default function EditItemScreen() {
     }
   };
 
+  const handleClose = () => {
+    if (normalizedReturnTo) {
+      router.replace(normalizedReturnTo);
+      return;
+    }
+
+    router.back();
+  };
+
   const handleSave = async () => {
     if (!heading.trim()) {
       Alert.alert('Error', 'Heading is required.');
@@ -137,6 +158,7 @@ export default function EditItemScreen() {
 
     const metadata = serializeAddContentMeta({
       subcategory,
+      isFavorite,
       externalLink: externalLink.trim() || undefined,
       imageUri: imageUri || undefined,
       fileName: uploadedFile?.name,
@@ -156,6 +178,11 @@ export default function EditItemScreen() {
         image: imageUri || null,
         url: websiteLink.trim() || null,
       });
+
+      if (normalizedReturnTo) {
+        router.replace(normalizedReturnTo);
+        return;
+      }
 
       router.back();
     } catch (error) {
@@ -182,7 +209,7 @@ export default function EditItemScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity onPress={handleClose} style={styles.backButton}>
             <Ionicons name="close" size={24} color="#FFFFFF" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Edit Content</Text>
@@ -249,6 +276,24 @@ export default function EditItemScreen() {
             required
             multiline
           />
+
+          <View style={styles.section}>
+            <Text style={styles.label}>Favorite</Text>
+            <View style={styles.optionWrap}>
+              <TouchableOpacity
+                style={[styles.optionChip, !isFavorite && styles.optionChipActive]}
+                onPress={() => setIsFavorite(false)}
+              >
+                <Text style={[styles.optionText, !isFavorite && styles.optionTextActive]}>Normal</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.optionChip, isFavorite && styles.optionChipActive]}
+                onPress={() => setIsFavorite(true)}
+              >
+                <Text style={[styles.optionText, isFavorite && styles.optionTextActive]}>Favorite</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
 
           <Text style={styles.groupTitle}>Media</Text>
           <ImageUpload imageUri={imageUri} onChange={setImageUri} />

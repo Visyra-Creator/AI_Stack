@@ -26,6 +26,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   const candidates = API_BASE_URL_CANDIDATES.length > 0 ? API_BASE_URL_CANDIDATES : [API_BASE_URL];
   let lastError: Error | null = null;
+  const attemptErrors: string[] = [];
+
+  const isNgrokTunnelOffline = (status: number, body: string) => {
+    if (status !== 404) {
+      return false;
+    }
+
+    return /ERR_NGROK_3200|endpoint .* is offline/i.test(body);
+  };
 
   for (const baseUrl of candidates) {
     try {
@@ -39,7 +48,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
       if (!response.ok) {
         const text = await response.text();
+        if (isNgrokTunnelOffline(response.status, text)) {
+          lastError = new Error(`Ngrok tunnel is offline for ${baseUrl}`);
+          attemptErrors.push(`${baseUrl} -> ngrok tunnel offline`);
+          continue;
+        }
+
         lastError = new Error(`API ${response.status}: ${text || 'Request failed'}`);
+        attemptErrors.push(`${baseUrl} -> API ${response.status}`);
         continue;
       }
 
@@ -50,13 +66,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       return response.json() as Promise<T>;
     } catch (error) {
       lastError = error as Error;
+      const message = (error as Error)?.name === 'AbortError'
+        ? 'request timed out'
+        : (error as Error)?.message || 'network error';
+      attemptErrors.push(`${baseUrl} -> ${message}`);
     }
   }
 
   const details = candidates.join(', ');
-  const message =
-    lastError?.message || `Network request failed. Tried: ${details}`;
-  throw new Error(message.includes('Tried:') ? message : `${message}. Tried: ${details}`);
+  const attemptSummary = attemptErrors.length ? ` Attempts: ${attemptErrors.join(' | ')}` : '';
+  const lastMessage = lastError?.message || 'Network request failed';
+  const helpText =
+    ' Set EXPO_PUBLIC_API_URL to an active backend URL, then restart Expo.';
+  throw new Error(`${lastMessage}. Tried: ${details}.${attemptSummary}${helpText}`);
 }
 
 export const getHealth = () => request<{ status: string }>('/health');

@@ -1,11 +1,28 @@
-const FALLBACK_API_URL = 'https://multiparous-dax-tepidly.ngrok-free.dev';
+import Constants from 'expo-constants';
+
+const FALLBACK_API_URL = 'http://localhost:8000';
 
 const normalizeUrl = (url: string) => url.trim().replace(/\/+$/, '');
 
 const envPrimary = process.env.EXPO_PUBLIC_API_URL;
 const envSecondary = process.env.EXPO_PUBLIC_BACKEND_URL;
+const envList = (process.env.EXPO_PUBLIC_API_URLS || '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
 
-const API_BASE_URLS = [envPrimary, envSecondary, FALLBACK_API_URL]
+const hostUri = Constants.expoConfig?.hostUri || '';
+const hostFromExpo = hostUri.split(':')[0]?.trim();
+const lanDevApiUrl = hostFromExpo ? `http://${hostFromExpo}:8000` : '';
+
+const API_BASE_URLS = [
+  envPrimary,
+  envSecondary,
+  ...envList,
+  lanDevApiUrl,
+  'http://10.0.2.2:8000',
+  FALLBACK_API_URL,
+]
   .filter((value): value is string => Boolean(value && value.trim()))
   .map((value) => normalizeUrl(value));
 

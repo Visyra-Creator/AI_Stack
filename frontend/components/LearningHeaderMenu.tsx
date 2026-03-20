@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -7,27 +7,42 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 interface MenuLink {
   id: string;
   label: string;
-  route: '/learning/tutorials' | '/learning/guides';
+  route: '/learning/tutorials' | '/learning/guides' | '/learning/miscellaneous';
 }
 
 const menuLinks: MenuLink[] = [
   { id: 'tutorials', label: 'Tutorials', route: '/learning/tutorials' },
   { id: 'guides', label: 'Guides', route: '/learning/guides' },
+  { id: 'miscellaneous', label: 'Miscellaneous', route: '/learning/miscellaneous' },
 ];
 
 export function LearningHeaderMenu() {
   const router = useRouter();
+  const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
+  const lastNavigateAtRef = useRef(0);
 
   const handleNavigate = (route: MenuLink['route']) => {
+    const now = Date.now();
+    if (now - lastNavigateAtRef.current < 500) {
+      setIsOpen(false);
+      return;
+    }
+    lastNavigateAtRef.current = now;
+
+    if (pathname === route) {
+      setIsOpen(false);
+      return;
+    }
+
     setIsOpen(false);
-    router.push(route);
+    router.navigate(route);
   };
 
   return (

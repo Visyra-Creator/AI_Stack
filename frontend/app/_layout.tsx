@@ -47,6 +47,17 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="learning/miscellaneous"
+          options={{
+            headerShown: true,
+            title: 'Miscellaneous',
+            headerStyle: { backgroundColor: '#0F0F0F' },
+            headerTintColor: '#FFFFFF',
+            headerShadowVisible: false,
+            headerRight: () => <LearningHeaderMenu />,
+          }}
+        />
+        <Stack.Screen
           name="learning/tutorial/[id]"
           options={{
             headerShown: true,

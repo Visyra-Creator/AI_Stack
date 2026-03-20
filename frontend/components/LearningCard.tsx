@@ -7,9 +7,10 @@ interface LearningCardProps {
   description: string;
   onPress: () => void;
   compact?: boolean;
+  sourceLabel?: string;
 }
 
-export function LearningCard({ title, description, onPress, compact = false }: LearningCardProps) {
+export function LearningCard({ title, description, onPress, compact = false, sourceLabel }: LearningCardProps) {
   return (
     <TouchableOpacity
       style={[styles.card, compact && styles.cardCompact]}
@@ -17,10 +18,15 @@ export function LearningCard({ title, description, onPress, compact = false }: L
       activeOpacity={0.86}
     >
       <View style={styles.textWrap}>
-        <Text style={styles.title} numberOfLines={1}>{title}</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.title} numberOfLines={1}>{title}</Text>
+        </View>
         <Text style={styles.description} numberOfLines={compact ? 2 : 3}>{description}</Text>
       </View>
-      <Ionicons name="chevron-forward" size={18} color="#9CA7BA" />
+      <View style={styles.rightWrap}>
+        {sourceLabel ? <Text style={styles.source}>{sourceLabel}</Text> : null}
+        <Ionicons name="chevron-forward" size={18} color="#9CA7BA" />
+      </View>
     </TouchableOpacity>
   );
 }
@@ -49,16 +55,32 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 8,
   },
+  rightWrap: {
+    minWidth: 54,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+    gap: 6,
+  },
+  headerRow: {
+    marginBottom: 6,
+  },
   title: {
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '700',
-    marginBottom: 6,
+    flex: 1,
   },
   description: {
     color: '#8D95A3',
     fontSize: 13,
     lineHeight: 18,
+  },
+  source: {
+    color: '#9CB8FF',
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
   },
 });
 

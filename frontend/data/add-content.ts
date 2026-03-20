@@ -12,6 +12,7 @@ export interface AddContentMeta {
   categories?: string[];
   subcategory: string;
   subcategories?: string[];
+  isFavorite?: boolean;
   externalLink?: string;
   fileName?: string;
   fileUri?: string;
@@ -22,7 +23,7 @@ export interface AddContentMeta {
 export const categorySubcategoryOptions: Record<AddContentCategory, string[]> = {
   'AI & Tools': ['Tool Reviews', 'Automation', 'Integrations'],
   'Prompts & Knowledge': ['Prompt Library', 'Templates', 'Knowledge Notes'],
-  Learning: ['Tutorials', 'Guides'],
+  Learning: ['Tutorials', 'Guides', 'Miscellaneous'],
   'Business & Growth': ['Marketing', 'Lead Generation', 'Sales'],
   'Content Creation': ['Photography', 'Video', 'Design'],
 };
@@ -45,6 +46,7 @@ export function serializeAddContentMeta(meta: AddContentMeta): string | null {
     !compactMeta.subcategory &&
     (!compactMeta.subcategories || compactMeta.subcategories.length === 0) &&
     !compactMeta.externalLink &&
+    !compactMeta.isFavorite &&
     !compactMeta.fileUri &&
     !compactMeta.imageUri &&
     (!compactMeta.categories || compactMeta.categories.length === 0)

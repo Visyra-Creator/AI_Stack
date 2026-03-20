@@ -26,14 +26,23 @@ import {
 } from '../../data/add-content';
 import { createItem } from '../../services/api';
 
+type LearningReturnRoute = '/learning/tutorials' | '/learning/guides' | '/learning/miscellaneous';
+
 export default function AddContentFormScreen() {
-  const { category, subcategory: incomingSubcategory } = useLocalSearchParams<{
+  const { category, categoryLabel, subcategory: incomingSubcategory, returnTo } = useLocalSearchParams<{
     category: string;
+    categoryLabel?: string;
     subcategory?: string;
+    returnTo?: string;
   }>();
   const router = useRouter();
+  const normalizedReturnTo: LearningReturnRoute | undefined =
+    returnTo === '/learning/tutorials' || returnTo === '/learning/guides' || returnTo === '/learning/miscellaneous'
+      ? returnTo
+      : undefined;
   const [heading, setHeading] = useState('');
   const selectedCategory = (category ?? '').trim();
+  const categoryDisplayLabel = (categoryLabel ?? selectedCategory).trim();
   const parsedCategory = isAddContentCategory(selectedCategory)
     ? (selectedCategory as AddContentCategory)
     : null;
@@ -50,6 +59,7 @@ export default function AddContentFormScreen() {
     initialSubcategory ? [initialSubcategory] : []
   );
   const [description, setDescription] = useState('');
+  const [isFavorite, setIsFavorite] = useState(false);
   const [externalLink, setExternalLink] = useState('');
   const [websiteLink, setWebsiteLink] = useState('');
   const [imageUri, setImageUri] = useState('');
@@ -111,6 +121,15 @@ export default function AddContentFormScreen() {
     }
   };
 
+  const handleClose = () => {
+    if (normalizedReturnTo) {
+      router.back();
+      return;
+    }
+
+    router.back();
+  };
+
   const handleSave = async () => {
     if (!selectedCategory) {
       Alert.alert('Error', 'Please select a category first.');
@@ -128,9 +147,25 @@ export default function AddContentFormScreen() {
       return;
     }
 
+    const persistedCategory = parsedCategory ?? (categoryDisplayLabel || selectedCategory);
+    const isTutorialFlow = normalizedReturnTo === '/learning/tutorials';
+    const isGuidesFlow = normalizedReturnTo === '/learning/guides';
+    const isMiscFlow = normalizedReturnTo === '/learning/miscellaneous';
+
+    const effectiveCategory = isTutorialFlow || isGuidesFlow || isMiscFlow ? 'Learning' : persistedCategory;
+    const effectiveSubcategories = isTutorialFlow
+      ? ['Tutorials']
+      : isGuidesFlow
+        ? ['Guides']
+        : isMiscFlow
+          ? ['Miscellaneous']
+        : selectedSubcategories;
+    const effectiveSubcategory = effectiveSubcategories[0] ?? '';
+
     const metadata = serializeAddContentMeta({
-      subcategory: selectedSubcategory,
-      subcategories: selectedSubcategories,
+      subcategory: effectiveSubcategory,
+      subcategories: effectiveSubcategories,
+      isFavorite,
       externalLink: externalLink.trim() || undefined,
       imageUri: imageUri || undefined,
       fileName: uploadedFile?.name,
@@ -139,7 +174,7 @@ export default function AddContentFormScreen() {
     });
 
     const payload = {
-      category: selectedCategory,
+      category: effectiveCategory,
       title: heading.trim(),
       description: description.trim(),
       notes: metadata,
@@ -151,8 +186,13 @@ export default function AddContentFormScreen() {
     try {
       await createItem(payload);
 
+      if (normalizedReturnTo) {
+        router.back();
+        return;
+      }
+
       const shouldOpenTutorials =
-        selectedCategory === 'Learning' &&
+        parsedCategory === 'Learning' &&
         selectedSubcategories.some((item) => item.toLowerCase().includes('tutorial'));
 
       if (shouldOpenTutorials) {
@@ -162,7 +202,7 @@ export default function AddContentFormScreen() {
 
       router.replace({
         pathname: '/category/[name]',
-        params: { name: selectedCategory },
+        params: { name: effectiveCategory },
       });
     } catch (error) {
       console.error('Error creating item:', error);
@@ -181,7 +221,7 @@ export default function AddContentFormScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity onPress={handleClose} style={styles.backButton}>
             <Ionicons name="close" size={24} color="#FFFFFF" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Add Content</Text>
@@ -209,7 +249,7 @@ export default function AddContentFormScreen() {
           <View style={styles.section}>
             <Text style={styles.label}>Category</Text>
             <View style={styles.categoryBadge}>
-              <Text style={styles.categoryText}>{selectedCategory || 'Select category'}</Text>
+              <Text style={styles.categoryText}>{categoryDisplayLabel || 'Select category'}</Text>
             </View>
           </View>
 
@@ -268,6 +308,28 @@ export default function AddContentFormScreen() {
             required
             multiline
           />
+
+          <View style={styles.section}>
+            <Text style={styles.label}>Favorite</Text>
+            <View style={styles.favoriteRow}>
+              <TouchableOpacity
+                style={[styles.favoriteChip, !isFavorite && styles.favoriteChipActive]}
+                onPress={() => setIsFavorite(false)}
+                activeOpacity={0.86}
+              >
+                <Ionicons name="star-outline" size={14} color={!isFavorite ? '#D7E3FF' : '#9BA5B8'} />
+                <Text style={[styles.favoriteChipText, !isFavorite && styles.favoriteChipTextActive]}>Normal</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.favoriteChip, isFavorite && styles.favoriteChipActive]}
+                onPress={() => setIsFavorite(true)}
+                activeOpacity={0.86}
+              >
+                <Ionicons name="star" size={14} color={isFavorite ? '#FEC84B' : '#9BA5B8'} />
+                <Text style={[styles.favoriteChipText, isFavorite && styles.favoriteChipTextActive]}>Favorite</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
 
           <Text style={styles.groupTitle}>Media</Text>
           <ImageUpload imageUri={imageUri} onChange={setImageUri} />
@@ -422,6 +484,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#243764',
+  },
+  favoriteRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  favoriteChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#2A3241',
+    backgroundColor: '#151A22',
+  },
+  favoriteChipActive: {
+    borderColor: '#3A7AFE',
+    backgroundColor: '#1A2440',
+  },
+  favoriteChipText: {
+    color: '#9BA5B8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  favoriteChipTextActive: {
+    color: '#D7E3FF',
   },
   linkActionsRow: {
     flexDirection: 'row',
