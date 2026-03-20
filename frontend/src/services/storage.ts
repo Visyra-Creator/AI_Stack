@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEYS = {
   AI_STACK: 'ai_stack',
+  AI_STACK_CATEGORIES: 'ai_stack_categories',
   PROMPTS: 'prompts',
   TOOLS: 'tools',
   TUTORIALS: 'tutorials',
@@ -13,11 +14,27 @@ const STORAGE_KEYS = {
   MARKETING: 'marketing',
 };
 
+const DEFAULT_AI_STACK_CATEGORIES = [
+  'Image Generation',
+  'Video Generation',
+  'Text Generation',
+  'Audio Generation',
+  'Code Generation',
+  'Data Analysis',
+  'Automation',
+  'Research',
+  'Design',
+  'Other',
+];
+
 export interface AIStackItem {
   id: string;
   toolName: string;
   url: string;
   categories: string[];
+  description?: string;
+  images?: string[];
+  files?: string[];
   usedFor: string;
   keyFeatures: string;
   pricing: 'free' | 'paid' | 'freemium';
@@ -172,6 +189,18 @@ export const aiStackStorage = {
   add: (item: Omit<AIStackItem, 'id' | 'createdAt'>) => addItem<AIStackItem>(STORAGE_KEYS.AI_STACK, item),
   update: (id: string, updates: Partial<AIStackItem>) => updateItem<AIStackItem>(STORAGE_KEYS.AI_STACK, id, updates),
   delete: (id: string) => deleteItem<AIStackItem>(STORAGE_KEYS.AI_STACK, id),
+};
+
+export const aiStackCategoryStorage = {
+  getAll: async (): Promise<string[]> => {
+    const categories = await getItems<string>(STORAGE_KEYS.AI_STACK_CATEGORIES);
+    if (categories.length === 0) {
+      await saveItems(STORAGE_KEYS.AI_STACK_CATEGORIES, DEFAULT_AI_STACK_CATEGORIES);
+      return DEFAULT_AI_STACK_CATEGORIES;
+    }
+    return categories;
+  },
+  saveAll: (categories: string[]) => saveItems(STORAGE_KEYS.AI_STACK_CATEGORIES, categories),
 };
 
 // Prompts

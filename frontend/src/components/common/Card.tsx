@@ -6,6 +6,7 @@ import { useTheme } from '@/src/context/ThemeContext';
 interface CardProps {
   title: string;
   subtitle?: string;
+  subtitleLines?: number;
   onPress?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
@@ -13,7 +14,7 @@ interface CardProps {
   tags?: string[];
 }
 
-export const Card: React.FC<CardProps> = ({ title, subtitle, onPress, onEdit, onDelete, children, tags }) => {
+export const Card: React.FC<CardProps> = ({ title, subtitle, subtitleLines = 2, onPress, onEdit, onDelete, children, tags }) => {
   const { colors } = useTheme();
 
   return (
@@ -25,7 +26,11 @@ export const Card: React.FC<CardProps> = ({ title, subtitle, onPress, onEdit, on
       <View style={styles.header}>
         <View style={styles.titleContainer}>
           <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>{title}</Text>
-          {subtitle && <Text style={[styles.subtitle, { color: colors.textSecondary }]} numberOfLines={2}>{subtitle}</Text>}
+          {subtitle && (
+            <Text style={[styles.subtitle, { color: colors.textSecondary }]} numberOfLines={subtitleLines} ellipsizeMode="tail">
+              {subtitle}
+            </Text>
+          )}
         </View>
         <View style={styles.actions}>
           {onEdit && (

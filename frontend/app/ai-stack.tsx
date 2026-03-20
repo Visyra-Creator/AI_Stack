@@ -5,8 +5,11 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  TextInput,
+  Image,
   Modal,
   Alert,
+  Linking,
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
@@ -14,43 +17,54 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '@/src/context/ThemeContext';
 import { Card } from '@/src/components/common/Card';
 import { FormInput } from '@/src/components/common/FormInput';
-import { Button } from '@/src/components/common/Button';
 import { MultiSelect } from '@/src/components/common/MultiSelect';
 import { Select } from '@/src/components/common/Select';
 import { EmptyState } from '@/src/components/common/EmptyState';
-import { aiStackStorage, AIStackItem } from '@/src/services/storage';
-
-const CATEGORIES = [
-  'Image Generation',
-  'Video Generation',
-  'Text Generation',
-  'Audio Generation',
-  'Code Generation',
-  'Data Analysis',
-  'Automation',
-  'Research',
-  'Design',
-  'Other',
-];
+import { aiStackStorage, aiStackCategoryStorage, AIStackItem } from '@/src/services/storage';
 
 const PRICING_OPTIONS = ['free', 'paid', 'freemium'];
+const SORT_OPTIONS = [
+  { label: 'Recent', value: 'recent' },
+  { label: 'Name', value: 'name' },
+  { label: 'Pricing', value: 'pricing' },
+] as const;
+
+type SortValue = (typeof SORT_OPTIONS)[number]['value'];
+type ViewMode = 'normal' | 'gallery';
 
 export default function AIStackScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const [items, setItems] = useState<AIStackItem[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
+  const [detailsVisible, setDetailsVisible] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<AIStackItem | null>(null);
   const [editingItem, setEditingItem] = useState<AIStackItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [categories, setCategories] = useState<string[]>([]);
+  const [activeFilter, setActiveFilter] = useState('All');
+  const [activeSort, setActiveSort] = useState<SortValue>('recent');
+  const [viewMode, setViewMode] = useState<ViewMode>('normal');
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
+  const [sortModalVisible, setSortModalVisible] = useState(false);
+  const [categoriesModalVisible, setCategoriesModalVisible] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState('');
 
   const [formData, setFormData] = useState({
     toolName: '',
     url: '',
     categories: [] as string[],
+    description: '',
+    images: [] as string[],
+    files: [] as string[],
     usedFor: '',
     keyFeatures: '',
     pricing: 'free' as 'free' | 'paid' | 'freemium',
@@ -64,14 +78,144 @@ export default function AIStackScreen() {
     setItems(data);
   }, []);
 
+  const loadCategories = useCallback(async () => {
+    const data = await aiStackCategoryStorage.getAll();
+    setCategories(data);
+  }, []);
+
   useEffect(() => {
     loadItems();
-  }, [loadItems]);
+    loadCategories();
+  }, [loadItems, loadCategories]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadItems();
+    await Promise.all([loadItems(), loadCategories()]);
     setRefreshing(false);
+  };
+
+  const normalizeCategory = (value: string) => value.trim();
+
+  const addCategory = async () => {
+    const value = normalizeCategory(newCategoryName);
+    if (!value) {
+      Alert.alert('Error', 'Category name cannot be empty');
+      return;
+    }
+
+    if (categories.some(category => category.toLowerCase() === value.toLowerCase())) {
+      Alert.alert('Error', 'Category already exists');
+      return;
+    }
+
+    const updatedCategories = [...categories, value];
+    await aiStackCategoryStorage.saveAll(updatedCategories);
+    setCategories(updatedCategories);
+    setNewCategoryName('');
+  };
+
+  const startEditCategory = (category: string) => {
+    setEditingCategory(category);
+    setEditingCategoryName(category);
+  };
+
+  const saveEditedCategory = async () => {
+    if (!editingCategory) return;
+
+    const value = normalizeCategory(editingCategoryName);
+    if (!value) {
+      Alert.alert('Error', 'Category name cannot be empty');
+      return;
+    }
+
+    if (
+      categories.some(
+        category =>
+          category.toLowerCase() === value.toLowerCase() &&
+          category.toLowerCase() !== editingCategory.toLowerCase(),
+      )
+    ) {
+      Alert.alert('Error', 'Category already exists');
+      return;
+    }
+
+    const updatedCategories = categories.map(category =>
+      category === editingCategory ? value : category,
+    );
+    await aiStackCategoryStorage.saveAll(updatedCategories);
+    setCategories(updatedCategories);
+
+    const allItems = await aiStackStorage.getAll();
+    const affectedItems = allItems.filter(item => item.categories.includes(editingCategory));
+    await Promise.all(
+      affectedItems.map(item =>
+        aiStackStorage.update(item.id, {
+          categories: item.categories.map(category =>
+            category === editingCategory ? value : category,
+          ),
+        }),
+      ),
+    );
+
+    if (activeFilter === editingCategory) {
+      setActiveFilter(value);
+    }
+
+    setFormData(prev => ({
+      ...prev,
+      categories: prev.categories.map(category =>
+        category === editingCategory ? value : category,
+      ),
+    }));
+
+    setEditingCategory(null);
+    setEditingCategoryName('');
+    await loadItems();
+  };
+
+  const deleteCategory = (categoryToDelete: string) => {
+    Alert.alert(
+      'Delete Category',
+      `Delete "${categoryToDelete}"? This removes it from existing tools too.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const updatedCategories = categories.filter(category => category !== categoryToDelete);
+            await aiStackCategoryStorage.saveAll(updatedCategories);
+            setCategories(updatedCategories);
+
+            const allItems = await aiStackStorage.getAll();
+            const affectedItems = allItems.filter(item => item.categories.includes(categoryToDelete));
+            await Promise.all(
+              affectedItems.map(item =>
+                aiStackStorage.update(item.id, {
+                  categories: item.categories.filter(category => category !== categoryToDelete),
+                }),
+              ),
+            );
+
+            if (activeFilter === categoryToDelete) {
+              setActiveFilter('All');
+            }
+
+            setFormData(prev => ({
+              ...prev,
+              categories: prev.categories.filter(category => category !== categoryToDelete),
+            }));
+
+            if (editingCategory === categoryToDelete) {
+              setEditingCategory(null);
+              setEditingCategoryName('');
+            }
+
+            await loadItems();
+          },
+        },
+      ],
+    );
   };
 
   const resetForm = () => {
@@ -79,6 +223,9 @@ export default function AIStackScreen() {
       toolName: '',
       url: '',
       categories: [],
+      description: '',
+      images: [],
+      files: [],
       usedFor: '',
       keyFeatures: '',
       pricing: 'free',
@@ -100,6 +247,9 @@ export default function AIStackScreen() {
       toolName: item.toolName,
       url: item.url,
       categories: item.categories,
+      description: item.description || '',
+      images: item.images || [],
+      files: item.files || [],
       usedFor: item.usedFor,
       keyFeatures: item.keyFeatures,
       pricing: item.pricing,
@@ -108,6 +258,18 @@ export default function AIStackScreen() {
       instructions: item.instructions,
     });
     setModalVisible(true);
+  };
+
+  const openDetailsModal = (item: AIStackItem) => {
+    console.log('AI Stack item:', item);
+    setSelectedItem(item);
+    setDetailsVisible(true);
+  };
+
+  const openEditFromDetails = () => {
+    if (!selectedItem) return;
+    setDetailsVisible(false);
+    openEditModal(selectedItem);
   };
 
   const handleSave = async () => {
@@ -141,10 +303,162 @@ export default function AIStackScreen() {
     ]);
   };
 
-  const filteredItems = items.filter(item =>
-    item.toolName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.categories.some(c => c.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const pickFiles = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'],
+        multiple: true,
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled && result.assets) {
+        const newFiles = result.assets.map(asset =>
+          JSON.stringify({
+            name: asset.name,
+            uri: asset.uri,
+            size: asset.size,
+            mimeType: asset.mimeType,
+          }),
+        );
+        setFormData(prev => ({ ...prev, files: [...prev.files, ...newFiles] }));
+      }
+    } catch (error) {
+      console.log('Error picking files:', error);
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      files: prev.files.filter((_, i) => i !== index),
+    }));
+  };
+
+  const pickImages = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission required', 'Please allow photo library access to upload images.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        quality: 1,
+      });
+
+      if (!result.canceled && result.assets) {
+        const newImages = result.assets.map(asset =>
+          JSON.stringify({
+            name: asset.fileName || `Image ${Date.now()}`,
+            uri: asset.uri,
+            width: asset.width,
+            height: asset.height,
+          }),
+        );
+        setFormData(prev => ({ ...prev, images: [...prev.images, ...newImages] }));
+      }
+    } catch (error) {
+      console.log('Error picking images:', error);
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      images: prev.images.filter((_, i) => i !== index),
+    }));
+  };
+
+  const getFileName = (fileStr: string) => {
+    try {
+      const parsed = JSON.parse(fileStr);
+      return parsed.name || 'Document';
+    } catch {
+      return 'Document';
+    }
+  };
+
+  const getFileUri = (fileStr: string) => {
+    try {
+      const parsed = JSON.parse(fileStr);
+      return parsed.uri as string | undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const getImageUri = (imageStr: string) => {
+    try {
+      const parsed = JSON.parse(imageStr);
+      return parsed.uri as string | undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const openFile = async (fileStr: string) => {
+    const uri = getFileUri(fileStr);
+    if (!uri) {
+      Alert.alert('Unable to open file', 'This attachment is missing a valid file path.');
+      return;
+    }
+
+    try {
+      const supported = await Linking.canOpenURL(uri);
+      if (!supported) {
+        Alert.alert('Unable to open file', 'No app available to open this file type.');
+        return;
+      }
+      await Linking.openURL(uri);
+    } catch {
+      Alert.alert('Unable to open file', 'Something went wrong while opening this attachment.');
+    }
+  };
+
+  const openFilesPicker = (files: string[]) => {
+    if (files.length === 1) {
+      openFile(files[0]);
+      return;
+    }
+
+    Alert.alert(
+      'Open attachment',
+      'Choose a file to open',
+      [
+        ...files.slice(0, 8).map(file => ({
+          text: getFileName(file),
+          onPress: () => openFile(file),
+        })),
+        { text: 'Cancel', style: 'cancel' as const },
+      ],
+    );
+  };
+
+  const filteredItems = items.filter(item => {
+    const matchesQuery =
+      item.toolName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.categories.some(c => c.toLowerCase().includes(searchQuery.toLowerCase()));
+    const matchesFilter =
+      activeFilter === 'All' || item.categories.includes(activeFilter);
+
+    return matchesQuery && matchesFilter;
+  });
+
+  const displayedItems = [...filteredItems].sort((a, b) => {
+    if (activeSort === 'name') {
+      return a.toolName.localeCompare(b.toolName);
+    }
+
+    if (activeSort === 'pricing') {
+      return a.pricing.localeCompare(b.pricing);
+    }
+
+    return b.createdAt - a.createdAt;
+  });
+
+  const filterOptions = ['All', ...categories];
 
   const getPricingColor = (pricing: string) => {
     switch (pricing) {
@@ -153,6 +467,20 @@ export default function AIStackScreen() {
       case 'freemium': return colors.warning;
       default: return colors.textSecondary;
     }
+  };
+
+  const getCardSubtitle = (item: AIStackItem) => {
+    const raw = (item.description?.trim() || '').trim();
+    if (!raw) return '';
+
+    const firstLine = raw.split('\n')[0].trim();
+    const isLong = raw.length > 120 || raw.includes('\n');
+    return isLong ? `${firstLine}.....` : firstLine;
+  };
+
+  const getPrimaryImageUri = (item: AIStackItem) => {
+    if (!item.images || item.images.length === 0) return undefined;
+    return getImageUri(item.images[0]);
   };
 
   return (
@@ -168,19 +496,52 @@ export default function AIStackScreen() {
       </View>
 
       <View style={styles.searchContainer}>
-        <View style={[styles.searchBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Ionicons name="search" size={20} color={colors.textSecondary} />
-          <FormInput
-            label=""
-            placeholder="Search tools..."
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            style={styles.searchInput}
-          />
+        <View style={styles.searchRow}>
+          <View style={[styles.searchBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Ionicons name="search" size={20} color={colors.textSecondary} />
+            <TextInput
+              placeholder="Search tools..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              style={[styles.searchInput, { color: colors.text }]}
+              placeholderTextColor={colors.textSecondary}
+            />
+          </View>
+          <TouchableOpacity
+            style={[styles.controlButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={() => setFilterModalVisible(true)}
+          >
+            <Ionicons name="funnel-outline" size={16} color={colors.textSecondary} />
+            <Text style={[styles.controlButtonText, { color: colors.text }]} numberOfLines={1}>
+              {activeFilter}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.controlButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={() => setSortModalVisible(true)}
+          >
+            <Ionicons name="swap-vertical-outline" size={16} color={colors.textSecondary} />
+            <Text style={[styles.controlButtonText, { color: colors.text }]} numberOfLines={1}>
+              {SORT_OPTIONS.find(option => option.value === activeSort)?.label}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.controlButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={() => setViewMode(prev => (prev === 'normal' ? 'gallery' : 'normal'))}
+          >
+            <Ionicons
+              name={viewMode === 'normal' ? 'grid-outline' : 'list-outline'}
+              size={16}
+              color={colors.textSecondary}
+            />
+            <Text style={[styles.controlButtonText, { color: colors.text }]} numberOfLines={1}>
+              {viewMode === 'normal' ? 'Gallery' : 'List'}
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
 
-      {filteredItems.length === 0 ? (
+      {displayedItems.length === 0 ? (
         <EmptyState
           icon="layers-outline"
           title="No AI Tools Yet"
@@ -193,31 +554,219 @@ export default function AIStackScreen() {
           style={styles.list}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
-          {filteredItems.map(item => (
-            <Card
-              key={item.id}
-              title={item.toolName}
-              subtitle={item.usedFor}
-              tags={item.categories}
-              onEdit={() => openEditModal(item)}
-              onDelete={() => handleDelete(item)}
-            >
-              <View style={styles.cardFooter}>
-                <View style={[styles.pricingBadge, { backgroundColor: getPricingColor(item.pricing) + '20' }]}>
-                  <Text style={[styles.pricingText, { color: getPricingColor(item.pricing) }]}>
-                    {item.pricing.charAt(0).toUpperCase() + item.pricing.slice(1)}
-                  </Text>
+          {viewMode === 'normal' ? (
+            displayedItems.map(item => (
+              <Card
+                key={item.id}
+                title={item.toolName}
+                subtitle={getCardSubtitle(item)}
+                subtitleLines={2}
+                onPress={() => openDetailsModal(item)}
+                onEdit={() => openEditModal(item)}
+                onDelete={() => handleDelete(item)}
+              >
+                <View style={styles.cardFooter}>
+                  <View style={styles.metaTagsWrap}>
+                    {item.categories.map((tag, index) => (
+                      <View key={`${tag}-${index}`} style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
+                        <Text style={[styles.metaTagText, { color: colors.primary }]}>{tag}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  <View style={[styles.pricingBadge, { backgroundColor: getPricingColor(item.pricing) + '20' }]}>
+                    <Text style={[styles.pricingText, { color: getPricingColor(item.pricing) }]}>
+                      {item.pricing.charAt(0).toUpperCase() + item.pricing.slice(1)}
+                    </Text>
+                  </View>
+                  {item.files && item.files.length > 0 && (
+                    <TouchableOpacity
+                      style={[
+                        styles.docsBadge,
+                        { backgroundColor: colors.surface, borderColor: colors.border },
+                      ]}
+                      onPress={() => openFilesPicker(item.files || [])}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.docsBadgeText, { color: colors.textSecondary }]}>
+                        {item.files.length} doc(s)
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  {item.images && item.images.length > 0 && (
+                    <View style={[styles.pricingBadge, { backgroundColor: colors.warning + '20' }]}>
+                      <Text style={[styles.pricingText, { color: colors.warning }]}>
+                        {item.images.length} image(s)
+                      </Text>
+                    </View>
+                  )}
                 </View>
-                {item.url && (
-                  <Text style={[styles.url, { color: colors.primary }]} numberOfLines={1}>
-                    {item.url}
-                  </Text>
-                )}
-              </View>
-            </Card>
-          ))}
+              </Card>
+            ))
+          ) : (
+            <View style={styles.galleryGrid}>
+              {displayedItems.map(item => {
+                const uri = getPrimaryImageUri(item);
+                return (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[styles.galleryCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                    onPress={() => openDetailsModal(item)}
+                    activeOpacity={0.85}
+                  >
+                    {uri ? (
+                      <Image source={{ uri }} style={styles.galleryImage} resizeMode="contain" />
+                    ) : (
+                      <View style={[styles.galleryPlaceholder, { backgroundColor: colors.surface }]}>
+                        <Ionicons name="image-outline" size={24} color={colors.textSecondary} />
+                      </View>
+                    )}
+                    <View style={styles.galleryContent}>
+                      <Text style={[styles.galleryTitle, { color: colors.text }]} numberOfLines={1}>{item.toolName}</Text>
+                      <Text style={[styles.gallerySubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
+                        {item.pricing.charAt(0).toUpperCase() + item.pricing.slice(1)}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
         </ScrollView>
       )}
+
+      <Modal visible={detailsVisible} animationType="slide" presentationStyle="pageSheet">
+        <SafeAreaView style={[styles.modalContainer, { backgroundColor: colors.background }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+            <TouchableOpacity onPress={() => setDetailsVisible(false)}>
+              <Text style={[styles.cancelText, { color: colors.textSecondary }]}>Close</Text>
+            </TouchableOpacity>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Tool Details</Text>
+            <TouchableOpacity onPress={openEditFromDetails}>
+              <Text style={[styles.saveText, { color: colors.primary }]}>Edit</Text>
+            </TouchableOpacity>
+          </View>
+
+          {selectedItem && (
+            <ScrollView
+              style={styles.detailsScroll}
+              contentContainerStyle={styles.detailsScrollContent}
+              showsVerticalScrollIndicator
+            >
+              <Text style={[styles.detailsTitle, { color: colors.text }]}>{selectedItem.toolName}</Text>
+
+              {selectedItem.categories.length > 0 && (
+                <View style={styles.detailsTags}>
+                  {selectedItem.categories.map((tag, index) => (
+                    <View key={`${tag}-${index}`} style={[styles.detailsTag, { backgroundColor: colors.primary + '20' }]}>
+                      <Text style={[styles.detailsTagText, { color: colors.primary }]}>{tag}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              <View style={styles.detailsSection}>
+                <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Pricing</Text>
+                <Text style={[styles.detailsValue, { color: getPricingColor(selectedItem.pricing) }]}>
+                  {selectedItem.pricing.charAt(0).toUpperCase() + selectedItem.pricing.slice(1)}
+                </Text>
+              </View>
+
+              {!!selectedItem.description?.trim() && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Description</Text>
+                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.description}</Text>
+                </View>
+              )}
+
+              {!!selectedItem.usedFor?.trim() && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>What It Is Used For</Text>
+                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.usedFor}</Text>
+                </View>
+              )}
+
+              {!!selectedItem.keyFeatures?.trim() && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Key Features</Text>
+                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.keyFeatures}</Text>
+                </View>
+              )}
+
+              {!!selectedItem.bestFor?.trim() && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Best For</Text>
+                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.bestFor}</Text>
+                </View>
+              )}
+
+              {!!selectedItem.guides?.trim() && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Guides/Documents</Text>
+                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.guides}</Text>
+                </View>
+              )}
+
+              {!!selectedItem.url?.trim() && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>URL</Text>
+                  <TouchableOpacity onPress={() => Linking.openURL(selectedItem.url)}>
+                    <Text style={[styles.detailsLink, { color: colors.primary }]} numberOfLines={2}>
+                      {selectedItem.url}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {selectedItem.files && selectedItem.files.length > 0 && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Attachments</Text>
+                  {selectedItem.files.map((file, index) => (
+                    <TouchableOpacity
+                      key={`${file}-${index}`}
+                      style={[styles.detailsFileRow, { borderColor: colors.border }]}
+                      onPress={() => openFile(file)}
+                    >
+                      <Ionicons name="document-text-outline" size={16} color={colors.primary} />
+                      <Text style={[styles.detailsFileName, { color: colors.text }]} numberOfLines={1}>
+                        {getFileName(file)}
+                      </Text>
+                      <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              {selectedItem.images && selectedItem.images.length > 0 && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Images</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.detailsImagesRow}>
+                    {selectedItem.images.map((image, index) => {
+                      const uri = getImageUri(image);
+                      if (!uri) return null;
+                      return (
+                        <Image
+                          key={`${image}-${index}`}
+                          source={{ uri }}
+                          style={styles.detailsImagePreview}
+                          resizeMode="contain"
+                        />
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+
+              {!!selectedItem.instructions?.trim() && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Instructions</Text>
+                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.instructions}</Text>
+                </View>
+              )}
+
+            </ScrollView>
+          )}
+        </SafeAreaView>
+      </Modal>
 
       <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet">
         <KeyboardAvoidingView
@@ -253,9 +802,24 @@ export default function AIStackScreen() {
             />
             <MultiSelect
               label="Categories"
-              options={CATEGORIES}
+              options={categories}
               selected={formData.categories}
               onChange={(categories) => setFormData({ ...formData, categories })}
+            />
+            <TouchableOpacity
+              style={[styles.manageCategoriesButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={() => setCategoriesModalVisible(true)}
+            >
+              <Ionicons name="settings-outline" size={16} color={colors.textSecondary} />
+              <Text style={[styles.manageCategoriesText, { color: colors.text }]}>Manage Categories</Text>
+            </TouchableOpacity>
+            <FormInput
+              label="Description"
+              placeholder="Add a full description of this tool..."
+              value={formData.description}
+              onChangeText={(text) => setFormData({ ...formData, description: text })}
+              multiline
+              style={styles.textArea}
             />
             <FormInput
               label="What's It Used For"
@@ -296,18 +860,195 @@ export default function AIStackScreen() {
               numberOfLines={3}
               style={styles.textArea}
             />
+            <View style={styles.uploadSection}>
+              <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>Upload Images</Text>
+              <TouchableOpacity
+                style={[styles.uploadButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={pickImages}
+              >
+                <Ionicons name="image-outline" size={18} color={colors.textSecondary} />
+                <Text style={[styles.uploadButtonText, { color: colors.text }]}>Add Images</Text>
+              </TouchableOpacity>
+
+              {formData.images.length > 0 && (
+                <View style={styles.imageGrid}>
+                  {formData.images.map((image, index) => {
+                    const uri = getImageUri(image);
+                    if (!uri) return null;
+                    return (
+                      <View key={`${image}-${index}`} style={styles.imageItem}>
+                        <Image source={{ uri }} style={styles.imagePreview} resizeMode="contain" />
+                        <TouchableOpacity
+                          style={[styles.imageRemoveButton, { backgroundColor: colors.background }]}
+                          onPress={() => removeImage(index)}
+                        >
+                          <Ionicons name="close-circle" size={18} color={colors.danger} />
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+
+            <View style={styles.uploadSection}>
+              <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>Upload Docs/PDFs</Text>
+              <TouchableOpacity
+                style={[styles.uploadButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={pickFiles}
+              >
+                <Ionicons name="document-attach-outline" size={18} color={colors.textSecondary} />
+                <Text style={[styles.uploadButtonText, { color: colors.text }]}>Add Files</Text>
+              </TouchableOpacity>
+
+              {formData.files.length > 0 && (
+                <View style={styles.fileList}>
+                  {formData.files.map((file, index) => (
+                    <View key={`${file}-${index}`} style={[styles.fileItem, { borderColor: colors.border }]}>
+                      <TouchableOpacity
+                        style={styles.fileInfo}
+                        onPress={() => openFile(file)}
+                        activeOpacity={0.75}
+                      >
+                        <Ionicons name="document-text-outline" size={16} color={colors.primary} />
+                        <Text style={[styles.fileName, { color: colors.text }]} numberOfLines={1}>
+                          {getFileName(file)}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => removeFile(index)}>
+                        <Ionicons name="close-circle" size={20} color={colors.danger} />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
             <FormInput
               label="Instructions"
               placeholder="Personal notes, tips..."
               value={formData.instructions}
               onChangeText={(text) => setFormData({ ...formData, instructions: text })}
               multiline
-              numberOfLines={4}
               style={styles.textArea}
             />
             <View style={styles.bottomPadding} />
           </ScrollView>
         </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal visible={filterModalVisible} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={[styles.optionSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Filter by Category</Text>
+            {filterOptions.map(option => (
+              <TouchableOpacity
+                key={option}
+                style={styles.optionRow}
+                onPress={() => {
+                  setActiveFilter(option);
+                  setFilterModalVisible(false);
+                }}
+              >
+                <Text style={[styles.optionText, { color: colors.text }]}>{option}</Text>
+                {activeFilter === option && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity onPress={() => setFilterModalVisible(false)} style={styles.optionClose}>
+              <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={sortModalVisible} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={[styles.optionSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Sort by</Text>
+            {SORT_OPTIONS.map(option => (
+              <TouchableOpacity
+                key={option.value}
+                style={styles.optionRow}
+                onPress={() => {
+                  setActiveSort(option.value);
+                  setSortModalVisible(false);
+                }}
+              >
+                <Text style={[styles.optionText, { color: colors.text }]}>{option.label}</Text>
+                {activeSort === option.value && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity onPress={() => setSortModalVisible(false)} style={styles.optionClose}>
+              <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={categoriesModalVisible} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={[styles.optionSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Manage Categories</Text>
+
+            <View style={[styles.categoryInputRow, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+              <TextInput
+                value={newCategoryName}
+                onChangeText={setNewCategoryName}
+                placeholder="New category"
+                placeholderTextColor={colors.textSecondary}
+                style={[styles.categoryInput, { color: colors.text }]}
+              />
+              <TouchableOpacity
+                style={[styles.categoryActionButton, { backgroundColor: colors.primary }]}
+                onPress={addCategory}
+              >
+                <Ionicons name="add" size={16} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.categoriesList}>
+              {categories.map(category => (
+                <View key={category} style={[styles.categoryRow, { borderBottomColor: colors.border }]}>
+                  {editingCategory === category ? (
+                    <TextInput
+                      value={editingCategoryName}
+                      onChangeText={setEditingCategoryName}
+                      style={[styles.categoryEditInput, { color: colors.text, borderColor: colors.border }]}
+                    />
+                  ) : (
+                    <Text style={[styles.optionText, { color: colors.text }]}>{category}</Text>
+                  )}
+
+                  <View style={styles.categoryActions}>
+                    {editingCategory === category ? (
+                      <TouchableOpacity onPress={saveEditedCategory} style={styles.categoryIconButton}>
+                        <Ionicons name="checkmark" size={18} color={colors.success} />
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity onPress={() => startEditCategory(category)} style={styles.categoryIconButton}>
+                        <Ionicons name="create-outline" size={17} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity onPress={() => deleteCategory(category)} style={styles.categoryIconButton}>
+                      <Ionicons name="trash-outline" size={17} color={colors.danger} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              onPress={() => {
+                setCategoriesModalVisible(false);
+                setEditingCategory(null);
+                setEditingCategoryName('');
+                setNewCategoryName('');
+              }}
+              style={styles.optionClose}
+            >
+              <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -342,27 +1083,102 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 8,
   },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   searchBox: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
     borderRadius: 10,
+    height: 40,
     paddingLeft: 12,
+    flex: 1,
   },
   searchInput: {
     flex: 1,
-    borderWidth: 0,
-    marginBottom: 0,
+    fontSize: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+  },
+  controlButton: {
+    height: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    maxWidth: 112,
+  },
+  controlButtonText: {
+    fontSize: 12,
+    fontWeight: '500',
+    maxWidth: 74,
   },
   list: {
     flex: 1,
     paddingHorizontal: 16,
   },
+  galleryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    paddingBottom: 8,
+  },
+  galleryCard: {
+    width: '31.6%',
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 12,
+    overflow: 'hidden',
+    minHeight: 190,
+  },
+  galleryImage: {
+    width: '100%',
+    height: 140,
+    backgroundColor: '#0F172A22',
+  },
+  galleryPlaceholder: {
+    width: '100%',
+    height: 140,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  galleryContent: {
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+  },
+  galleryTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  gallerySubtitle: {
+    fontSize: 11,
+    marginTop: 3,
+  },
   cardFooter: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     marginTop: 12,
-    gap: 12,
+    gap: 8,
+  },
+  metaTagsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  metaTag: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  metaTagText: {
+    fontSize: 11,
+    fontWeight: '500',
   },
   pricingBadge: {
     paddingHorizontal: 10,
@@ -373,9 +1189,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
-  url: {
-    fontSize: 12,
-    flex: 1,
+  docsBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  docsBadgeText: {
+    fontSize: 11,
+    fontWeight: '500',
   },
   modalContainer: {
     flex: 1,
@@ -403,11 +1225,246 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
   },
+  detailsScroll: {
+    flex: 1,
+  },
+  detailsScrollContent: {
+    padding: 16,
+    paddingBottom: 36,
+  },
   textArea: {
     minHeight: 80,
     textAlignVertical: 'top',
   },
+  detailsTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  detailsTags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 16,
+  },
+  detailsTag: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  detailsTagText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  detailsSection: {
+    marginBottom: 16,
+  },
+  detailsLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  detailsValue: {
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  detailsLink: {
+    fontSize: 14,
+    textDecorationLine: 'underline',
+  },
+  detailsFileRow: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  detailsFileName: {
+    flex: 1,
+    fontSize: 13,
+  },
+  manageCategoriesButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  manageCategoriesText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  uploadSection: {
+    marginBottom: 16,
+  },
+  uploadLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 6,
+  },
+  uploadButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  uploadButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  fileList: {
+    marginTop: 10,
+    gap: 8,
+  },
+  fileItem: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  fileInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  fileName: {
+    flex: 1,
+    fontSize: 13,
+  },
+  imageGrid: {
+    marginTop: 10,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  imageItem: {
+    width: 84,
+    height: 84,
+    borderRadius: 10,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  imagePreview: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#0F172A22',
+  },
+  imageRemoveButton: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    borderRadius: 10,
+  },
+  detailsImagesRow: {
+    gap: 8,
+    paddingRight: 8,
+  },
+  detailsImagePreview: {
+    width: 88,
+    height: 88,
+    borderRadius: 10,
+    backgroundColor: '#0F172A22',
+  },
   bottomPadding: {
     height: 40,
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'flex-end',
+  },
+  optionSheet: {
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    borderTopWidth: 1,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 24,
+  },
+  optionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 10,
+  },
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+  },
+  optionText: {
+    fontSize: 15,
+  },
+  optionClose: {
+    alignSelf: 'center',
+    marginTop: 8,
+    paddingVertical: 6,
+  },
+  optionCloseText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  categoryInputRow: {
+    borderWidth: 1,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    marginBottom: 10,
+  },
+  categoryInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 10,
+  },
+  categoryActionButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoriesList: {
+    maxHeight: 240,
+  },
+  categoryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  categoryActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  categoryIconButton: {
+    padding: 4,
+  },
+  categoryEditInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    fontSize: 14,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    marginRight: 8,
   },
 });
