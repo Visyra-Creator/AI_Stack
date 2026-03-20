@@ -8,6 +8,7 @@ const STORAGE_KEYS = {
   TOOLS: 'tools',
   TUTORIALS: 'tutorials',
   OPEN_SOURCE: 'open_source',
+  OPEN_SOURCE_CATEGORIES: 'open_source_categories',
   LEAD_GENERATION: 'lead_generation',
   BUSINESS: 'business',
   CONTENT_CREATION: 'content_creation',
@@ -29,6 +30,18 @@ const DEFAULT_AI_STACK_CATEGORIES = [
 ];
 
 const DEFAULT_PROMPT_CATEGORIES = ['image', 'video', 'text', 'audio', 'other'];
+
+const DEFAULT_OPEN_SOURCE_CATEGORIES = [
+  'AI/ML',
+  'Web Development',
+  'Mobile Development',
+  'DevOps',
+  'Data Science',
+  'Automation',
+  'Graphics',
+  'Audio/Video',
+  'Other',
+];
 
 export interface AIStackItem {
   id: string;
@@ -91,6 +104,7 @@ export interface OpenSourceItem {
   instructions: string;
   links: { label: string; url: string }[];
   category: string;
+  isFavorite?: boolean;
   createdAt: number;
 }
 
@@ -254,6 +268,18 @@ export const openSourceStorage = {
   add: (item: Omit<OpenSourceItem, 'id' | 'createdAt'>) => addItem<OpenSourceItem>(STORAGE_KEYS.OPEN_SOURCE, item),
   update: (id: string, updates: Partial<OpenSourceItem>) => updateItem<OpenSourceItem>(STORAGE_KEYS.OPEN_SOURCE, id, updates),
   delete: (id: string) => deleteItem<OpenSourceItem>(STORAGE_KEYS.OPEN_SOURCE, id),
+};
+
+export const openSourceCategoryStorage = {
+  getAll: async (): Promise<string[]> => {
+    const categories = await getItems<string>(STORAGE_KEYS.OPEN_SOURCE_CATEGORIES);
+    if (categories.length === 0) {
+      await saveItems(STORAGE_KEYS.OPEN_SOURCE_CATEGORIES, DEFAULT_OPEN_SOURCE_CATEGORIES);
+      return DEFAULT_OPEN_SOURCE_CATEGORIES;
+    }
+    return categories;
+  },
+  saveAll: (categories: string[]) => saveItems(STORAGE_KEYS.OPEN_SOURCE_CATEGORIES, categories),
 };
 
 // Lead Generation

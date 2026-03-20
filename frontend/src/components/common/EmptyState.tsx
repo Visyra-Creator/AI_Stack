@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, ViewStyle, TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/src/context/ThemeContext';
 import { Button } from '@/src/components/common/Button';
@@ -10,6 +10,8 @@ interface EmptyStateProps {
   description: string;
   actionLabel?: string;
   onAction?: () => void;
+  buttonStyle?: ViewStyle;
+  buttonTextStyle?: TextStyle;
 }
 
 export const EmptyState: React.FC<EmptyStateProps> = ({
@@ -18,6 +20,8 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   description,
   actionLabel,
   onAction,
+  buttonStyle,
+  buttonTextStyle,
 }) => {
   const { colors } = useTheme();
 
@@ -29,7 +33,12 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
       <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
       <Text style={[styles.description, { color: colors.textSecondary }]}>{description}</Text>
       {actionLabel && onAction && (
-        <Button title={actionLabel} onPress={onAction} style={styles.button} />
+        <Button
+          title={actionLabel}
+          onPress={onAction}
+          style={[styles.button, buttonStyle]}
+          textStyle={buttonTextStyle}
+        />
       )}
     </View>
   );

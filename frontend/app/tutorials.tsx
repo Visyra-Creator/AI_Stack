@@ -224,6 +224,27 @@ export default function TutorialsScreen() {
     await openExternalLink(uri);
   };
 
+  const renderLinkedText = (value: string) => {
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    return (
+      <Text style={[styles.detailsValue, { color: colors.text }]}>
+        {value.split(urlRegex).map((part, index) => (
+          /^https?:\/\/[^\s]+$/i.test(part) ? (
+            <Text
+              key={`${part}-${index}`}
+              style={[styles.detailsValue, { color: colors.primary, textDecorationLine: 'underline' }]}
+              onPress={() => openExternalLink(part)}
+            >
+              {part}
+            </Text>
+          ) : (
+            <Text key={`${part}-${index}`}>{part}</Text>
+          )
+        ))}
+      </Text>
+    );
+  };
+
   const getTutorialPreviewLine = (item: TutorialItem) => {
     const raw = (item.description?.trim() || item.instructions?.trim() || '').trim();
     if (!raw) return '';
@@ -528,14 +549,14 @@ export default function TutorialsScreen() {
               {!!selectedItem.description?.trim() && (
                 <View style={styles.detailsSection}>
                   <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Description</Text>
-                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.description}</Text>
+                  {renderLinkedText(selectedItem.description)}
                 </View>
               )}
 
               {!!selectedItem.instructions?.trim() && (
                 <View style={styles.detailsSection}>
                   <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Instructions</Text>
-                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.instructions}</Text>
+                  {renderLinkedText(selectedItem.instructions)}
                 </View>
               )}
 
