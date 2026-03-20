@@ -5,11 +5,14 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  TextInput,
   Modal,
   Alert,
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
+  FlatList,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -19,17 +22,34 @@ import { Card } from '@/src/components/common/Card';
 import { FormInput } from '@/src/components/common/FormInput';
 import { Select } from '@/src/components/common/Select';
 import { EmptyState } from '@/src/components/common/EmptyState';
-import { businessStorage, BusinessItem } from '@/src/services/storage';
+import { businessStorage, businessCategoryStorage, BusinessItem } from '@/src/services/storage';
+
+const SORT_OPTIONS = [
+  { label: 'Recent', value: 'recent' },
+  { label: 'Name', value: 'name' },
+  { label: 'Section', value: 'section' },
+] as const;
+
+type SortValue = (typeof SORT_OPTIONS)[number]['value'];
+type ViewMode = 'normal' | 'gallery';
 
 export default function BusinessScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const galleryColumns = windowWidth > windowHeight ? 4 : 3;
+  const galleryCardWidth = (windowWidth - 32 - (galleryColumns - 1) * 8) / galleryColumns;
   const [items, setItems] = useState<BusinessItem[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingItem, setEditingItem] = useState<BusinessItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [sections, setSections] = useState<string[]>(['General']);
   const [activeSection, setActiveSection] = useState('All');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeSort, setActiveSort] = useState<SortValue>('recent');
+  const [viewMode, setViewMode] = useState<ViewMode>('normal');
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
+  const [sortModalVisible, setSortModalVisible] = useState(false);
   const [newSection, setNewSection] = useState('');
   const [sectionModalVisible, setSectionModalVisible] = useState(false);
 
@@ -128,9 +148,27 @@ export default function BusinessScreen() {
     }
   };
 
-  const filteredItems = activeSection === 'All'
-    ? items
-    : items.filter(item => item.sectionName === activeSection);
+  const filteredItems = items.filter(item => {
+    const matchesQuery =
+      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.sectionName.toLowerCase().includes(searchQuery.toLowerCase());
+
+    const matchesFilter = activeSection === 'All' || item.sectionName === activeSection;
+    return matchesQuery && matchesFilter;
+  });
+
+  const displayedItems = [...filteredItems].sort((a, b) => {
+    if (activeSort === 'name') {
+      return a.name.localeCompare(b.name);
+    }
+    if (activeSort === 'section') {
+      return a.sectionName.localeCompare(b.sectionName);
+    }
+    return b.createdAt - a.createdAt;
+  });
+
+  const filterOptions = ['All', ...sections];
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -145,6 +183,52 @@ export default function BusinessScreen() {
           </TouchableOpacity>
           <TouchableOpacity onPress={openAddModal} style={[styles.addButton, { backgroundColor: colors.primary }]}>
             <Ionicons name="add" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={styles.searchContainer}>
+        <View style={styles.searchRow}>
+          <View style={[styles.searchBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Ionicons name="search" size={20} color={colors.textSecondary} />
+            <TextInput
+              placeholder="Search items..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              style={[styles.searchInput, { color: colors.text }]}
+              placeholderTextColor={colors.textSecondary}
+            />
+          </View>
+          <TouchableOpacity
+            style={[styles.controlButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={() => setFilterModalVisible(true)}
+          >
+            <Ionicons name="funnel-outline" size={16} color={colors.textSecondary} />
+            <Text style={[styles.controlButtonText, { color: colors.text }]} numberOfLines={1}>
+              {activeSection}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.controlButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={() => setSortModalVisible(true)}
+          >
+            <Ionicons name="swap-vertical-outline" size={16} color={colors.textSecondary} />
+            <Text style={[styles.controlButtonText, { color: colors.text }]} numberOfLines={1}>
+              {SORT_OPTIONS.find(option => option.value === activeSort)?.label}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.controlButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={() => setViewMode(prev => (prev === 'normal' ? 'gallery' : 'normal'))}
+          >
+            <Ionicons
+              name={viewMode === 'normal' ? 'grid-outline' : 'list-outline'}
+              size={16}
+              color={colors.textSecondary}
+            />
+            <Text style={[styles.controlButtonText, { color: colors.text }]} numberOfLines={1}>
+              {viewMode === 'normal' ? 'Gallery' : 'List'}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -179,7 +263,7 @@ export default function BusinessScreen() {
         ))}
       </ScrollView>
 
-      {filteredItems.length === 0 ? (
+      {displayedItems.length === 0 ? (
         <EmptyState
           icon="briefcase-outline"
           title="No Business Items"
@@ -187,12 +271,12 @@ export default function BusinessScreen() {
           actionLabel="Add Item"
           onAction={openAddModal}
         />
-      ) : (
+      ) : viewMode === 'normal' ? (
         <ScrollView
           style={styles.list}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
-          {filteredItems.map(item => (
+          {displayedItems.map(item => (
             <Card
               key={item.id}
               title={item.name}
@@ -209,7 +293,89 @@ export default function BusinessScreen() {
             </Card>
           ))}
         </ScrollView>
+      ) : (
+        <FlatList
+          key={`gallery-${galleryColumns}`}
+          style={styles.list}
+          data={displayedItems}
+          keyExtractor={(item) => item.id}
+          numColumns={galleryColumns}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.galleryListContent}
+          columnWrapperStyle={styles.galleryColumnWrapper}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={[
+                styles.galleryCard,
+                { width: galleryCardWidth, backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+              onPress={() => openEditModal(item)}
+              activeOpacity={0.85}
+            >
+              <Text style={[styles.galleryTitle, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
+              <Text style={[styles.gallerySubtitle, { color: colors.textSecondary }]} numberOfLines={2}>
+                {item.description || 'No description'}
+              </Text>
+              <View style={[styles.galleryTag, { backgroundColor: colors.primary + '20' }]}>
+                <Text style={[styles.galleryTagText, { color: colors.primary }]} numberOfLines={1}>
+                  {item.sectionName}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          )}
+        />
       )}
+
+      <Modal visible={filterModalVisible} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={[styles.optionSheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Filter by Section</Text>
+            <ScrollView>
+              {filterOptions.map(option => (
+                <TouchableOpacity
+                  key={option}
+                  style={styles.optionRow}
+                  onPress={() => {
+                    setActiveSection(option);
+                    setFilterModalVisible(false);
+                  }}
+                >
+                  <Text style={[styles.optionText, { color: colors.text }]}>{option}</Text>
+                  {activeSection === option && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity onPress={() => setFilterModalVisible(false)} style={styles.optionClose}>
+              <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={sortModalVisible} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={[styles.optionSheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Sort by</Text>
+            {SORT_OPTIONS.map(option => (
+              <TouchableOpacity
+                key={option.value}
+                style={styles.optionRow}
+                onPress={() => {
+                  setActiveSort(option.value);
+                  setSortModalVisible(false);
+                }}
+              >
+                <Text style={[styles.optionText, { color: colors.text }]}>{option.label}</Text>
+                {activeSort === option.value && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity onPress={() => setSortModalVisible(false)} style={styles.optionClose}>
+              <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Add/Edit Item Modal */}
       <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet">
@@ -339,6 +505,43 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     maxHeight: 44,
   },
+  searchContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  searchBox: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 42,
+    gap: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+  },
+  controlButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    height: 42,
+    gap: 6,
+    maxWidth: 110,
+  },
+  controlButtonText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
   tab: {
     paddingHorizontal: 16,
     paddingVertical: 8,
@@ -354,9 +557,82 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 16,
   },
+  galleryListContent: {
+    paddingBottom: 12,
+  },
+  galleryColumnWrapper: {
+    gap: 8,
+    marginBottom: 8,
+  },
+  galleryCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 10,
+    minHeight: 120,
+  },
+  galleryTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  gallerySubtitle: {
+    fontSize: 12,
+    marginTop: 6,
+    lineHeight: 16,
+    flex: 1,
+  },
+  galleryTag: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginTop: 8,
+  },
+  galleryTagText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
   link: {
     fontSize: 12,
     marginTop: 8,
+  },
+  overlay: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 24,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  optionSheet: {
+    borderWidth: 1,
+    borderRadius: 16,
+    maxHeight: '70%',
+    paddingVertical: 10,
+  },
+  optionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    paddingHorizontal: 14,
+    paddingBottom: 8,
+  },
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  optionText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  optionClose: {
+    marginTop: 4,
+    alignSelf: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  optionCloseText: {
+    fontSize: 14,
+    fontWeight: '500',
   },
   modalContainer: {
     flex: 1,
