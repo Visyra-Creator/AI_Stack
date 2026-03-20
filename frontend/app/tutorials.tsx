@@ -39,8 +39,9 @@ export default function TutorialsScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const galleryColumns = windowWidth > windowHeight ? 4 : 3;
-  const galleryCardWidth = (windowWidth - 32 - (galleryColumns - 1) * 8) / galleryColumns;
+  const galleryColumns = 4;
+  const gap = 1;
+  const galleryCardWidth = (windowWidth - (galleryColumns - 1) * gap) / galleryColumns;
 
   const [items, setItems] = useState<TutorialItem[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
@@ -737,15 +738,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
   },
   galleryColumnWrapper: {
-    justifyContent: 'space-between',
-    marginBottom: 8,
-    paddingHorizontal: 16,
-    gap: 8,
+    justifyContent: 'flex-start',
+    marginBottom: 1,
+    paddingHorizontal: 0,
+    gap: 1,
   },
   galleryCard: {
     aspectRatio: 1,
-    borderRadius: 16,
-    borderWidth: 1,
     overflow: 'hidden',
   },
   galleryPlaceholder: {

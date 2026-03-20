@@ -15,6 +15,7 @@ import {
   useWindowDimensions,
   Image,
   GestureResponderEvent,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -41,8 +42,9 @@ export default function BusinessScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const galleryColumns = windowWidth > windowHeight ? 4 : 3;
-  const galleryCardWidth = (windowWidth - 32 - (galleryColumns - 1) * 8) / galleryColumns;
+  const galleryColumns = 4;
+  const gap = 1;
+  const galleryCardWidth = (windowWidth - (galleryColumns - 1) * gap) / galleryColumns;
   const [items, setItems] = useState<BusinessItem[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingItem, setEditingItem] = useState<BusinessItem | null>(null);
@@ -63,6 +65,11 @@ export default function BusinessScreen() {
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState('');
   const [images, setImages] = useState<string[]>([]);
+  const [isFavoritesOnly, setIsFavoritesOnly] = useState(false);
+
+  const toggleFavoritesOnly = () => {
+    setIsFavoritesOnly(prev => !prev);
+  };
 
   const [formData, setFormData] = useState({
     sectionName: 'General',
@@ -111,6 +118,64 @@ export default function BusinessScreen() {
       images: [],
     });
     setEditingItem(null);
+  };
+
+  const [detailsVisible, setDetailsVisible] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<BusinessItem | null>(null);
+
+  const openDetailsModal = (item: BusinessItem) => {
+    setSelectedItem(item);
+    setDetailsVisible(true);
+  };
+
+  const openEditFromDetails = () => {
+    if (selectedItem) {
+      setDetailsVisible(false);
+      openEditModal(selectedItem);
+    }
+  };
+
+  const getImageUri = (imageStr: string) => {
+    try {
+      const parsed = JSON.parse(imageStr);
+      return parsed.uri as string | undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const openExternalLink = async (url: string) => {
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (!supported) {
+        Alert.alert('Unable to open link', 'No app available to open this link.');
+        return;
+      }
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert('Unable to open link', 'Something went wrong while opening this link.');
+    }
+  };
+
+  const renderLinkedText = (value: string) => {
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    return (
+      <Text style={[styles.detailsValue, { color: colors.text }]}>
+        {value.split(urlRegex).map((part, index) => (
+          /^https?:\/\/[^\s]+$/i.test(part) ? (
+            <Text
+              key={`${part}-${index}`}
+              style={[styles.detailsValue, { color: colors.primary, textDecorationLine: 'underline' }]}
+              onPress={() => openExternalLink(part)}
+            >
+              {part}
+            </Text>
+          ) : (
+            <Text key={`${part}-${index}`}>{part}</Text>
+          )
+        ))}
+      </Text>
+    );
   };
 
   const openAddModal = () => {
@@ -186,6 +251,17 @@ export default function BusinessScreen() {
         },
       },
     ]);
+  };
+
+  const toggleFavorite = async (item: BusinessItem) => {
+    const nextFavorite = !(item.isFavorite ?? false);
+    await businessStorage.update(item.id, { isFavorite: nextFavorite });
+    setItems(prev => prev.map(current => (current.id === item.id ? { ...current, isFavorite: nextFavorite } : current)));
+  };
+
+  const onFavoritePress = (event: GestureResponderEvent, item: BusinessItem) => {
+    event.stopPropagation();
+    toggleFavorite(item);
   };
 
   const addSection = () => {
@@ -327,7 +403,9 @@ export default function BusinessScreen() {
       item.sectionName.toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesFilter = activeSection === 'All' || item.sectionName === activeSection;
-    return matchesQuery && matchesFilter;
+    const matchesFavorites = isFavoritesOnly ? (item.isFavorite ?? false) : true;
+    
+    return matchesQuery && matchesFilter && matchesFavorites;
   });
 
   const displayedItems = [...filteredItems].sort((a, b) => {
@@ -379,6 +457,22 @@ export default function BusinessScreen() {
             <Text style={[styles.controlButtonText, { color: colors.text }]} numberOfLines={1}>
               {activeSection}
             </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.favoriteFilterButton,
+              {
+                backgroundColor: isFavoritesOnly ? colors.primary + '20' : colors.surface,
+                borderColor: isFavoritesOnly ? colors.primary : colors.border,
+              },
+            ]}
+            onPress={toggleFavoritesOnly}
+          >
+            <Ionicons
+              name={isFavoritesOnly ? 'heart' : 'heart-outline'}
+              size={16}
+              color={isFavoritesOnly ? colors.primary : colors.textSecondary}
+            />
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.controlButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
@@ -454,6 +548,9 @@ export default function BusinessScreen() {
               title={item.name}
               subtitle={item.description}
               tags={[item.sectionName]}
+              onPress={() => openDetailsModal(item)}
+              onFavorite={() => toggleFavorite(item)}
+              isFavorite={item.isFavorite ?? false}
               onEdit={() => openEditModal(item)}
               onDelete={() => handleDelete(item)}
             >
@@ -484,20 +581,31 @@ export default function BusinessScreen() {
                   styles.galleryCard,
                   { width: galleryCardWidth, backgroundColor: colors.card, borderColor: colors.border },
                 ]}
-                onPress={() => openEditModal(item)}
+                onPress={() => openDetailsModal(item)}
                 activeOpacity={0.85}
               >
+                <TouchableOpacity
+                  style={[styles.galleryFavoriteButton, { backgroundColor: 'rgba(0,0,0,0.45)' }]}
+                  onPress={(event) => onFavoritePress(event, item)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name={(item.isFavorite ?? false) ? 'heart' : 'heart-outline'}
+                    size={16}
+                    color={(item.isFavorite ?? false) ? '#FF6B6B' : '#FFFFFF'}
+                  />
+                </TouchableOpacity>
                 {uri ? (
                   <Image source={{ uri }} style={styles.galleryImage} resizeMode="cover" />
                 ) : (
                   <View style={[styles.galleryPlaceholder, { backgroundColor: colors.surface }]}>
-                    <Ionicons name="briefcase-outline" size={24} color={colors.textSecondary} />
+                    <Ionicons name="image-outline" size={24} color={colors.textSecondary} />
                   </View>
                 )}
                 <View style={styles.galleryOverlay}>
                   <Text style={styles.galleryTitle} numberOfLines={1}>{item.name}</Text>
                   <Text style={styles.gallerySubtitle} numberOfLines={1}>
-                    {item.description || 'No description'}
+                    {item.description ? item.description.split('\n')[0].trim() : ''}
                   </Text>
                 </View>
               </TouchableOpacity>
@@ -557,6 +665,92 @@ export default function BusinessScreen() {
       </Modal>
 
       {/* Add/Edit Item Modal */}
+      <Modal visible={detailsVisible} animationType="slide" presentationStyle="pageSheet">
+        <SafeAreaView style={[styles.modalContainer, { backgroundColor: colors.background }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+            <TouchableOpacity onPress={() => setDetailsVisible(false)}>
+              <Text style={[styles.cancelText, { color: colors.textSecondary }]}>Close</Text>
+            </TouchableOpacity>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Details</Text>
+            <TouchableOpacity onPress={openEditFromDetails}>
+              <Text style={[styles.saveText, { color: colors.primary }]}>Edit</Text>
+            </TouchableOpacity>
+          </View>
+
+          {selectedItem && (
+            <ScrollView
+              style={styles.detailsScroll}
+              contentContainerStyle={styles.detailsScrollContent}
+              showsVerticalScrollIndicator
+            >
+              <Text style={[styles.detailsTitle, { color: colors.text }]}>{selectedItem.name}</Text>
+
+              {selectedItem.categories && selectedItem.categories.length > 0 && (
+                <View style={styles.detailsTags}>
+                  {selectedItem.categories.map((tag, index) => (
+                    <View key={`${tag}-${index}`} style={[styles.detailsTag, { backgroundColor: colors.primary + '20' }]}>
+                      <Text style={[styles.detailsTagText, { color: colors.primary }]}>{tag}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              
+              <View style={styles.detailsSection}>
+                <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Section</Text>
+                <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.sectionName}</Text>
+              </View>
+
+              {!!selectedItem.description?.trim() && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Description</Text>
+                  {renderLinkedText(selectedItem.description)}
+                </View>
+              )}
+
+              {!!selectedItem.instructions?.trim() && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Instructions</Text>
+                  {renderLinkedText(selectedItem.instructions)}
+                </View>
+              )}
+
+              {!!selectedItem.link?.trim() && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>URL</Text>
+                  <TouchableOpacity onPress={() => openExternalLink(selectedItem.link)}>
+                    <Text style={[styles.detailsLink, { color: colors.primary }]} numberOfLines={2}>
+                      {selectedItem.link}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {selectedItem.images && selectedItem.images.length > 0 && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Images</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.detailsImagesRow}>
+                    {selectedItem.images.map((image, index) => {
+                      const uri = getImageUri(image);
+                      if (!uri) return null;
+                      return (
+                        <Image
+                          key={`${image}-${index}`}
+                          source={{ uri }}
+                          style={styles.detailsImagePreview}
+                          resizeMode="contain"
+                        />
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+
+              <View style={styles.bottomPadding} />
+            </ScrollView>
+          )}
+        </SafeAreaView>
+      </Modal>
+
       <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet">
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -626,25 +820,31 @@ export default function BusinessScreen() {
               numberOfLines={4}
               style={styles.textArea}
             />
-            <View style={styles.imageSection}>
-              <Text style={[styles.imageSectionTitle, { color: colors.text }]}>Images</Text>
-              <View style={styles.imageGrid}>
-                {formData.images.map((imageUri, index) => (
-                  <View key={index} style={styles.imageContainer}>
-                    <Image source={{ uri: imageUri }} style={styles.imagePreview} />
-                    <TouchableOpacity
-                      style={styles.removeImageButton}
-                      onPress={() => removeImage(imageUri)}
-                    >
-                      <Ionicons name="close-circle" size={20} color="#FFFFFF" />
-                    </TouchableOpacity>
-                  </View>
-                ))}
-                <TouchableOpacity style={[styles.addImageButton, { borderColor: colors.border, backgroundColor: colors.surface }]} onPress={pickImage}>
-                  <Ionicons name="add" size={24} color={colors.text} />
-                  <Text style={[styles.addImageText, { color: colors.textSecondary }]}>Add Image</Text>
-                </TouchableOpacity>
-              </View>
+            <View style={styles.uploadSection}>
+              <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>Upload Images</Text>
+              <TouchableOpacity
+                style={[styles.uploadButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={pickImage}
+              >
+                <Ionicons name="image-outline" size={18} color={colors.textSecondary} />
+                <Text style={[styles.uploadButtonText, { color: colors.text }]}>Add Images</Text>
+              </TouchableOpacity>
+
+              {formData.images.length > 0 && (
+                <View style={styles.imageGrid}>
+                  {formData.images.map((imageUri, index) => (
+                    <View key={index} style={styles.imageItem}>
+                      <Image source={{ uri: imageUri }} style={styles.imagePreview} resizeMode="contain" />
+                      <TouchableOpacity
+                        style={[styles.imageRemoveButton, { backgroundColor: colors.background }]}
+                        onPress={() => removeImage(imageUri)}
+                      >
+                        <Ionicons name="close-circle" size={18} color={colors.danger} />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
             </View>
             <View style={styles.bottomPadding} />
           </ScrollView>
@@ -818,6 +1018,14 @@ const styles = StyleSheet.create({
     gap: 6,
     maxWidth: 110,
   },
+  favoriteFilterButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   controlButtonText: {
     fontSize: 12,
     fontWeight: '500',
@@ -835,41 +1043,41 @@ const styles = StyleSheet.create({
   },
   list: {
     flex: 1,
-    paddingHorizontal: 16,
   },
   galleryListContent: {
-    paddingBottom: 12,
+    paddingBottom: 16,
+    paddingHorizontal: 0,
   },
   galleryColumnWrapper: {
-    gap: 8,
-    marginBottom: 8,
+    justifyContent: 'flex-start',
+    marginBottom: 1,
+    paddingHorizontal: 0,
+    gap: 1,
   },
   galleryCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 10,
-    minHeight: 120,
+    aspectRatio: 1,
+    overflow: 'hidden',
+  },
+  galleryFavoriteButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
   },
   galleryTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
+    color: '#FFFFFF',
   },
   gallerySubtitle: {
-    fontSize: 12,
-    marginTop: 6,
-    lineHeight: 16,
-    flex: 1,
-  },
-  galleryTag: {
-    alignSelf: 'flex-start',
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    marginTop: 8,
-  },
-  galleryTagText: {
     fontSize: 11,
-    fontWeight: '600',
+    color: '#E5E7EB',
+    marginTop: 2,
   },
   link: {
     fontSize: 12,
@@ -1054,50 +1262,105 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  imageSection: {
-    marginTop: 16,
+  uploadSection: {
+    marginBottom: 16,
   },
-  imageSectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 12,
+  uploadLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 6,
+  },
+  uploadButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  uploadButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
   },
   imageGrid: {
+    marginTop: 10,
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
   },
-  imageContainer: {
-    position: 'relative',
-    width: 80,
-    height: 80,
-    borderRadius: 12,
+  imageItem: {
+    width: 84,
+    height: 84,
+    borderRadius: 10,
     overflow: 'hidden',
+    position: 'relative',
   },
   imagePreview: {
     width: '100%',
     height: '100%',
-    borderRadius: 12,
+    backgroundColor: '#0F172A22',
   },
-  removeImageButton: {
+  imageRemoveButton: {
     position: 'absolute',
     top: 4,
     right: 4,
-    backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: 10,
-    padding: 2,
   },
-  addImageButton: {
-    width: 80,
-    height: 80,
+  detailsScroll: {
+    flex: 1,
+  },
+  detailsScrollContent: {
+    padding: 16,
+    paddingBottom: 36,
+  },
+  detailsTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  detailsTags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 16,
+  },
+  detailsTag: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderRadius: 12,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
   },
-  addImageText: {
-    fontSize: 10,
-    textAlign: 'center',
+  detailsTagText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
+  detailsSection: {
+    marginBottom: 16,
+  },
+  detailsLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  detailsValue: {
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  detailsLink: {
+    fontSize: 14,
+    textDecorationLine: 'underline',
+  },
+  detailsImagesRow: {
+    gap: 8,
+    paddingRight: 8,
+  },
+  detailsImagePreview: {
+    width: 88,
+    height: 88,
+    borderRadius: 10,
+    backgroundColor: '#0F172A22',
+  },
+
 });

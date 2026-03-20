@@ -118,6 +118,8 @@ export interface OpenSourceItem {
   instructions: string;
   links: { label: string; url: string }[];
   category: string;
+  images?: string[];
+  files?: string[];
   isFavorite?: boolean;
   createdAt: number;
 }
@@ -146,6 +148,7 @@ export interface BusinessItem {
   categories?: string[];
   images?: string[];
   files?: string[];
+  isFavorite?: boolean;
   createdAt: number;
 }
 
