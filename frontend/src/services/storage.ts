@@ -4,6 +4,7 @@ const STORAGE_KEYS = {
   AI_STACK: 'ai_stack',
   AI_STACK_CATEGORIES: 'ai_stack_categories',
   PROMPTS: 'prompts',
+  PROMPT_CATEGORIES: 'prompt_categories',
   TOOLS: 'tools',
   TUTORIALS: 'tutorials',
   OPEN_SOURCE: 'open_source',
@@ -27,6 +28,8 @@ const DEFAULT_AI_STACK_CATEGORIES = [
   'Other',
 ];
 
+const DEFAULT_PROMPT_CATEGORIES = ['image', 'video', 'text', 'audio', 'other'];
+
 export interface AIStackItem {
   id: string;
   toolName: string;
@@ -41,18 +44,21 @@ export interface AIStackItem {
   bestFor: string;
   guides: string;
   instructions: string;
+  isFavorite?: boolean;
   createdAt: number;
 }
 
 export interface PromptItem {
   id: string;
   promptName: string;
+  description?: string;
   prompt: string;
   inputImage?: string;
   generatedImage?: string;
   aiToolUsed: string;
-  category: 'image' | 'video' | 'text' | 'audio' | 'other';
+  category: string;
   type: 'general' | 'personal';
+  isFavorite?: boolean;
   createdAt: number;
 }
 
@@ -209,6 +215,18 @@ export const promptsStorage = {
   add: (item: Omit<PromptItem, 'id' | 'createdAt'>) => addItem<PromptItem>(STORAGE_KEYS.PROMPTS, item),
   update: (id: string, updates: Partial<PromptItem>) => updateItem<PromptItem>(STORAGE_KEYS.PROMPTS, id, updates),
   delete: (id: string) => deleteItem<PromptItem>(STORAGE_KEYS.PROMPTS, id),
+};
+
+export const promptsCategoryStorage = {
+  getAll: async (): Promise<string[]> => {
+    const categories = await getItems<string>(STORAGE_KEYS.PROMPT_CATEGORIES);
+    if (categories.length === 0) {
+      await saveItems(STORAGE_KEYS.PROMPT_CATEGORIES, DEFAULT_PROMPT_CATEGORIES);
+      return DEFAULT_PROMPT_CATEGORIES;
+    }
+    return categories;
+  },
+  saveAll: (categories: string[]) => saveItems(STORAGE_KEYS.PROMPT_CATEGORIES, categories),
 };
 
 // Tools

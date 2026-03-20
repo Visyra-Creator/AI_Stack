@@ -13,6 +13,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
+  FlatList,
+  useWindowDimensions,
+  GestureResponderEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -40,6 +43,9 @@ type ViewMode = 'normal' | 'gallery';
 export default function AIStackScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const galleryColumns = windowWidth > windowHeight ? 4 : 3;
+  const galleryCardWidth = (windowWidth - 32 - (galleryColumns - 1) * 8) / galleryColumns;
   const [items, setItems] = useState<AIStackItem[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [detailsVisible, setDetailsVisible] = useState(false);
@@ -303,6 +309,17 @@ export default function AIStackScreen() {
     ]);
   };
 
+  const toggleFavorite = async (item: AIStackItem) => {
+    const nextFavorite = !(item.isFavorite ?? false);
+    await aiStackStorage.update(item.id, { isFavorite: nextFavorite });
+    setItems(prev => prev.map(current => (current.id === item.id ? { ...current, isFavorite: nextFavorite } : current)));
+  };
+
+  const onFavoritePress = (event: GestureResponderEvent, item: AIStackItem) => {
+    event.stopPropagation();
+    toggleFavorite(item);
+  };
+
   const pickFiles = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -441,7 +458,8 @@ export default function AIStackScreen() {
       item.toolName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.categories.some(c => c.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesFilter =
-      activeFilter === 'All' || item.categories.includes(activeFilter);
+      activeFilter === 'All' ||
+      (activeFilter === 'Favorites' ? (item.isFavorite ?? false) : item.categories.includes(activeFilter));
 
     return matchesQuery && matchesFilter;
   });
@@ -458,7 +476,12 @@ export default function AIStackScreen() {
     return b.createdAt - a.createdAt;
   });
 
-  const filterOptions = ['All', ...categories];
+  const filterOptions = ['All', 'Favorites', ...categories];
+  const isFavoritesOnly = activeFilter === 'Favorites';
+
+  const toggleFavoritesOnly = () => {
+    setActiveFilter(prev => (prev === 'Favorites' ? 'All' : 'Favorites'));
+  };
 
   const getPricingColor = (pricing: string) => {
     switch (pricing) {
@@ -472,10 +495,7 @@ export default function AIStackScreen() {
   const getCardSubtitle = (item: AIStackItem) => {
     const raw = (item.description?.trim() || '').trim();
     if (!raw) return '';
-
-    const firstLine = raw.split('\n')[0].trim();
-    const isLong = raw.length > 120 || raw.includes('\n');
-    return isLong ? `${firstLine}.....` : firstLine;
+    return raw.split('\n')[0].trim();
   };
 
   const getPrimaryImageUri = (item: AIStackItem) => {
@@ -517,6 +537,22 @@ export default function AIStackScreen() {
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
+            style={[
+              styles.favoriteFilterButton,
+              {
+                backgroundColor: isFavoritesOnly ? colors.primary + '20' : colors.surface,
+                borderColor: isFavoritesOnly ? colors.primary : colors.border,
+              },
+            ]}
+            onPress={toggleFavoritesOnly}
+          >
+            <Ionicons
+              name={isFavoritesOnly ? 'heart' : 'heart-outline'}
+              size={16}
+              color={isFavoritesOnly ? colors.primary : colors.textSecondary}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
             style={[styles.controlButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
             onPress={() => setSortModalVisible(true)}
           >
@@ -549,89 +585,109 @@ export default function AIStackScreen() {
           actionLabel="Add Tool"
           onAction={openAddModal}
         />
-      ) : (
+      ) : viewMode === 'normal' ? (
         <ScrollView
           style={styles.list}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
-          {viewMode === 'normal' ? (
-            displayedItems.map(item => (
-              <Card
-                key={item.id}
-                title={item.toolName}
-                subtitle={getCardSubtitle(item)}
-                subtitleLines={2}
-                onPress={() => openDetailsModal(item)}
-                onEdit={() => openEditModal(item)}
-                onDelete={() => handleDelete(item)}
-              >
-                <View style={styles.cardFooter}>
-                  <View style={styles.metaTagsWrap}>
-                    {item.categories.map((tag, index) => (
-                      <View key={`${tag}-${index}`} style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
-                        <Text style={[styles.metaTagText, { color: colors.primary }]}>{tag}</Text>
-                      </View>
-                    ))}
-                  </View>
-                  <View style={[styles.pricingBadge, { backgroundColor: getPricingColor(item.pricing) + '20' }]}>
-                    <Text style={[styles.pricingText, { color: getPricingColor(item.pricing) }]}>
-                      {item.pricing.charAt(0).toUpperCase() + item.pricing.slice(1)}
+          {displayedItems.map(item => (
+            <Card
+              key={item.id}
+              title={item.toolName}
+              subtitle={getCardSubtitle(item)}
+              subtitleLines={1}
+              onPress={() => openDetailsModal(item)}
+              onFavorite={() => toggleFavorite(item)}
+              isFavorite={item.isFavorite ?? false}
+              onEdit={() => openEditModal(item)}
+              onDelete={() => handleDelete(item)}
+            >
+              <View style={styles.cardFooter}>
+                <View style={styles.metaTagsWrap}>
+                  {item.categories.map((tag, index) => (
+                    <View key={`${tag}-${index}`} style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
+                      <Text style={[styles.metaTagText, { color: colors.primary }]}>{tag}</Text>
+                    </View>
+                  ))}
+                </View>
+                <View style={[styles.pricingBadge, { backgroundColor: getPricingColor(item.pricing) + '20' }]}>
+                  <Text style={[styles.pricingText, { color: getPricingColor(item.pricing) }]}>
+                    {item.pricing.charAt(0).toUpperCase() + item.pricing.slice(1)}
+                  </Text>
+                </View>
+                {item.files && item.files.length > 0 && (
+                  <TouchableOpacity
+                    style={[
+                      styles.docsBadge,
+                      { backgroundColor: colors.surface, borderColor: colors.border },
+                    ]}
+                    onPress={() => openFilesPicker(item.files || [])}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.docsBadgeText, { color: colors.textSecondary }]}>
+                      {item.files.length} doc(s)
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                {item.images && item.images.length > 0 && (
+                  <View style={[styles.pricingBadge, { backgroundColor: colors.warning + '20' }]}>
+                    <Text style={[styles.pricingText, { color: colors.warning }]}>
+                      {item.images.length} image(s)
                     </Text>
                   </View>
-                  {item.files && item.files.length > 0 && (
-                    <TouchableOpacity
-                      style={[
-                        styles.docsBadge,
-                        { backgroundColor: colors.surface, borderColor: colors.border },
-                      ]}
-                      onPress={() => openFilesPicker(item.files || [])}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={[styles.docsBadgeText, { color: colors.textSecondary }]}>
-                        {item.files.length} doc(s)
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                  {item.images && item.images.length > 0 && (
-                    <View style={[styles.pricingBadge, { backgroundColor: colors.warning + '20' }]}>
-                      <Text style={[styles.pricingText, { color: colors.warning }]}>
-                        {item.images.length} image(s)
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              </Card>
-            ))
-          ) : (
-            <View style={styles.galleryGrid}>
-              {displayedItems.map(item => {
-                const uri = getPrimaryImageUri(item);
-                return (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={[styles.galleryCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-                    onPress={() => openDetailsModal(item)}
-                    activeOpacity={0.85}
-                  >
-                    {uri ? (
-                      <Image source={{ uri }} style={styles.galleryImage} resizeMode="contain" />
-                    ) : (
-                      <View style={[styles.galleryPlaceholder, { backgroundColor: colors.surface }]}>
-                        <Ionicons name="image-outline" size={24} color={colors.textSecondary} />
-                      </View>
-                    )}
-                    <View style={styles.galleryContent}>
-                      <Text style={[styles.galleryTitle, { color: colors.text }]} numberOfLines={1}>{item.toolName}</Text>
-                      <Text style={[styles.gallerySubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
-                        {item.pricing.charAt(0).toUpperCase() + item.pricing.slice(1)}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          )}
+                )}
+              </View>
+            </Card>
+          ))}
         </ScrollView>
+      ) : (
+        <FlatList
+          key={`gallery-${galleryColumns}`}
+          style={styles.list}
+          data={displayedItems}
+          keyExtractor={(item) => item.id}
+          numColumns={galleryColumns}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.galleryListContent}
+          columnWrapperStyle={styles.galleryColumnWrapper}
+          renderItem={({ item }) => {
+            const uri = getPrimaryImageUri(item);
+            return (
+              <TouchableOpacity
+                style={[
+                  styles.galleryCard,
+                  { width: galleryCardWidth, backgroundColor: colors.card, borderColor: colors.border },
+                ]}
+                onPress={() => openDetailsModal(item)}
+                activeOpacity={0.85}
+              >
+                <TouchableOpacity
+                  style={[styles.galleryFavoriteButton, { backgroundColor: 'rgba(0,0,0,0.45)' }]}
+                  onPress={(event) => onFavoritePress(event, item)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name={(item.isFavorite ?? false) ? 'heart' : 'heart-outline'}
+                    size={16}
+                    color={(item.isFavorite ?? false) ? '#FF6B6B' : '#FFFFFF'}
+                  />
+                </TouchableOpacity>
+                {uri ? (
+                  <Image source={{ uri }} style={styles.galleryImage} resizeMode="cover" />
+                ) : (
+                  <View style={[styles.galleryPlaceholder, { backgroundColor: colors.surface }]}>
+                    <Ionicons name="image-outline" size={24} color={colors.textSecondary} />
+                  </View>
+                )}
+                <View style={styles.galleryOverlay}>
+                  <Text style={styles.galleryTitle} numberOfLines={1}>{item.toolName}</Text>
+                  <Text style={styles.gallerySubtitle} numberOfLines={1}>{getCardSubtitle(item)}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          }}
+        />
       )}
 
       <Modal visible={detailsVisible} animationType="slide" presentationStyle="pageSheet">
@@ -1113,6 +1169,14 @@ const styles = StyleSheet.create({
     gap: 4,
     maxWidth: 112,
   },
+  favoriteFilterButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   controlButtonText: {
     fontSize: 12,
     fontWeight: '500',
@@ -1120,44 +1184,62 @@ const styles = StyleSheet.create({
   },
   list: {
     flex: 1,
-    paddingHorizontal: 16,
   },
-  galleryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  galleryListContent: {
+    paddingBottom: 16,
+    paddingHorizontal: 0,
+  },
+  galleryColumnWrapper: {
     justifyContent: 'space-between',
-    paddingBottom: 8,
+    marginBottom: 8,
+    paddingHorizontal: 16,
+    gap: 8,
   },
   galleryCard: {
-    width: '31.6%',
-    borderRadius: 12,
+    aspectRatio: 1,
+    borderRadius: 16,
     borderWidth: 1,
-    marginBottom: 12,
     overflow: 'hidden',
-    minHeight: 190,
   },
   galleryImage: {
     width: '100%',
-    height: 140,
-    backgroundColor: '#0F172A22',
+    height: '100%',
   },
   galleryPlaceholder: {
     width: '100%',
-    height: 140,
+    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  galleryContent: {
-    paddingHorizontal: 8,
+  galleryOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  galleryFavoriteButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
   },
   galleryTitle: {
     fontSize: 13,
     fontWeight: '600',
+    color: '#FFFFFF',
   },
   gallerySubtitle: {
     fontSize: 11,
-    marginTop: 3,
+    color: '#E5E7EB',
+    marginTop: 2,
   },
   cardFooter: {
     flexDirection: 'row',

@@ -9,6 +9,7 @@ import {
   Pressable,
   Dimensions,
   FlatList,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -17,6 +18,13 @@ import { useTheme } from '@/src/context/ThemeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: screenWidth } = Dimensions.get('window');
+const RECENT_IMAGE_SIZE = Math.floor((screenWidth - 40 - 24) / 4);
+
+interface RecentGeneratedImage {
+  id: string;
+  uri: string;
+  timestamp: number;
+}
 
 interface DashboardItem {
   id: string;
@@ -104,6 +112,7 @@ export default function HomeScreen() {
   const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [topCategories, setTopCategories] = useState<CategoryStats[]>([]);
   const [lastActivityTime, setLastActivityTime] = useState<number>(0);
+  const [recentGeneratedImages, setRecentGeneratedImages] = useState<RecentGeneratedImage[]>([]);
 
   const formatDateTime = (date: Date) => {
     const options: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' };
@@ -136,6 +145,7 @@ export default function HomeScreen() {
     let allItems: DashboardItem[] = [];
     const categoryMap: Record<string, CategoryStats> = {};
     const activityList: ActivityLog[] = [];
+    const generatedImagesList: RecentGeneratedImage[] = [];
     let maxLastActivity = 0;
     let weeklyCount = 0;
 
@@ -186,6 +196,40 @@ export default function HomeScreen() {
             icon: section.icon,
           });
         }
+
+        // Pull generated images from Prompts and AI Stack for dashboard gallery.
+        if (section.storageKey === 'prompts') {
+          for (const item of items) {
+            const imageUri = item.generatedImage || item.inputImage;
+            if (imageUri) {
+              generatedImagesList.push({
+                id: item.id,
+                uri: imageUri,
+                timestamp: item.createdAt || 0,
+              });
+            }
+          }
+        }
+
+        if (section.storageKey === 'ai_stack') {
+          for (const item of items) {
+            const images: string[] = item.images || [];
+            for (let index = 0; index < images.length; index++) {
+              try {
+                const parsed = JSON.parse(images[index]);
+                if (parsed?.uri) {
+                  generatedImagesList.push({
+                    id: `${item.id}-${index}`,
+                    uri: parsed.uri,
+                    timestamp: item.createdAt || 0,
+                  });
+                }
+              } catch {
+                // Ignore malformed image entries to keep dashboard robust.
+              }
+            }
+          }
+        }
       } catch (error) {
         console.error(`Error loading ${section.storageKey}:`, error);
       }
@@ -200,6 +244,9 @@ export default function HomeScreen() {
       .filter(cat => cat.count > 0)
       .sort((a, b) => b.count - a.count)
       .slice(0, 3);
+    const sortedGeneratedImages = generatedImagesList
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 16);
 
     setAllItems(sortedItems);
     setTotalCount(allItems.length);
@@ -210,6 +257,7 @@ export default function HomeScreen() {
     setActivities(sortedActivities);
     setTopCategories(topCatsArray);
     setLastActivityTime(maxLastActivity);
+    setRecentGeneratedImages(sortedGeneratedImages);
   };
 
   useFocusEffect(
@@ -364,6 +412,27 @@ export default function HomeScreen() {
             />
           </View>
         )}
+
+        {/* Recent Generated Images */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent Generated Images</Text>
+          {recentGeneratedImages.length > 0 ? (
+            <View style={styles.recentImagesGrid}>
+              {recentGeneratedImages.map((image) => (
+                <Image
+                  key={image.id}
+                  source={{ uri: image.uri }}
+                  style={[styles.recentImage, { backgroundColor: colors.surface }]}
+                  resizeMode="cover"
+                />
+              ))}
+            </View>
+          ) : (
+            <View style={[styles.recentImagesEmpty, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={[styles.recentImagesEmptyText, { color: colors.textSecondary }]}>No generated images yet</Text>
+            </View>
+          )}
+        </View>
 
         {/* Top Categories */}
         {topCategories.length > 0 && (
@@ -710,6 +779,26 @@ const styles = StyleSheet.create({
   },
   qaTime: {
     fontSize: 9,
+  },
+  recentImagesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  recentImage: {
+    width: RECENT_IMAGE_SIZE,
+    height: RECENT_IMAGE_SIZE,
+    borderRadius: 8,
+  },
+  recentImagesEmpty: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  recentImagesEmptyText: {
+    fontSize: 12,
+    fontWeight: '500',
   },
   topCatItem: {
     flexDirection: 'row',

@@ -8,13 +8,26 @@ interface CardProps {
   subtitle?: string;
   subtitleLines?: number;
   onPress?: () => void;
+  onFavorite?: () => void;
+  isFavorite?: boolean;
   onEdit?: () => void;
   onDelete?: () => void;
   children?: React.ReactNode;
   tags?: string[];
 }
 
-export const Card: React.FC<CardProps> = ({ title, subtitle, subtitleLines = 2, onPress, onEdit, onDelete, children, tags }) => {
+export const Card: React.FC<CardProps> = ({
+  title,
+  subtitle,
+  subtitleLines = 2,
+  onPress,
+  onFavorite,
+  isFavorite,
+  onEdit,
+  onDelete,
+  children,
+  tags,
+}) => {
   const { colors } = useTheme();
 
   return (
@@ -33,6 +46,15 @@ export const Card: React.FC<CardProps> = ({ title, subtitle, subtitleLines = 2, 
           )}
         </View>
         <View style={styles.actions}>
+          {onFavorite && (
+            <TouchableOpacity onPress={onFavorite} style={styles.iconButton}>
+              <Ionicons
+                name={isFavorite ? 'heart' : 'heart-outline'}
+                size={18}
+                color={isFavorite ? colors.danger : colors.textSecondary}
+              />
+            </TouchableOpacity>
+          )}
           {onEdit && (
             <TouchableOpacity onPress={onEdit} style={styles.iconButton}>
               <Ionicons name="pencil" size={18} color={colors.primary} />
