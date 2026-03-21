@@ -16,6 +16,7 @@ const STORAGE_KEYS = {
   CONTENT_CREATION: 'content_creation',
   CONTENT_CREATION_CATEGORIES: 'content_creation_categories',
   WEBSITE: 'website',
+  REFERENCE: 'reference',
   MARKETING: 'marketing',
   MARKETING_CATEGORIES: 'marketing_categories',
 };
@@ -209,6 +210,17 @@ export interface WebsiteItem {
   favoritedAt?: number;
 }
 
+export interface ReferenceItem {
+  id: string;
+  name: string;
+  link: string;
+  description: string;
+  isFavorite?: boolean;
+  createdAt: number;
+  updatedAt?: number;
+  favoritedAt?: number;
+}
+
 export interface MarketingItem {
   id: string;
   name: string;
@@ -267,15 +279,16 @@ async function updateItem<T extends { id: string }>(key: string, id: string, upd
   const items = await getItems<T>(key);
   const index = items.findIndex(item => item.id === id);
   if (index !== -1) {
-    if ('isFavorite' in updates) {
-      if (updates.isFavorite) {
-        (updates as any).favoritedAt = Date.now();
+    const finalUpdates: any = { ...updates };
+    if ('isFavorite' in finalUpdates) {
+      if (finalUpdates.isFavorite) {
+        finalUpdates.favoritedAt = Date.now();
       } else {
-        (updates as any).favoritedAt = undefined;
+        delete finalUpdates.favoritedAt;
       }
     }
-    (updates as any).updatedAt = Date.now();
-    items[index] = { ...items[index], ...updates };
+    finalUpdates.updatedAt = Date.now();
+    items[index] = { ...items[index], ...finalUpdates };
     await saveItems(key, items);
   }
 }
@@ -450,6 +463,13 @@ export const marketingStorage = {
   add: (item: Omit<MarketingItem, 'id' | 'createdAt'>) => addItem<MarketingItem>(STORAGE_KEYS.MARKETING, item),
   update: (id: string, updates: Partial<MarketingItem>) => updateItem<MarketingItem>(STORAGE_KEYS.MARKETING, id, updates),
   delete: (id: string) => deleteItem<MarketingItem>(STORAGE_KEYS.MARKETING, id),
+};
+
+export const referenceStorage = {
+  getAll: () => getItems<ReferenceItem>(STORAGE_KEYS.REFERENCE),
+  add: (item: Omit<ReferenceItem, 'id' | 'createdAt'>) => addItem<ReferenceItem>(STORAGE_KEYS.REFERENCE, item),
+  update: (id: string, updates: Partial<ReferenceItem>) => updateItem<ReferenceItem>(STORAGE_KEYS.REFERENCE, id, updates),
+  delete: (id: string) => deleteItem<ReferenceItem>(STORAGE_KEYS.REFERENCE, id),
 };
 
 export const marketingCategoryStorage = {

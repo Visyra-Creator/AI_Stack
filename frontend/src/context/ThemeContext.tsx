@@ -66,11 +66,16 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const loadTheme = async () => {
     try {
       const savedTheme = await AsyncStorage.getItem('theme');
-      if (savedTheme === 'light' || savedTheme === 'dark') {
-        setMode(savedTheme);
+      if (typeof savedTheme === 'string' && (savedTheme === 'light' || savedTheme === 'dark')) {
+        setMode(savedTheme as ThemeMode);
+      } else if (savedTheme) {
+        // If saved theme is corrupted, clear it
+        await AsyncStorage.removeItem('theme');
+        setMode('dark');
       }
     } catch (error) {
       console.log('Error loading theme:', error);
+      setMode('dark');
     }
   };
 

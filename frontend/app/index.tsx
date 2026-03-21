@@ -84,7 +84,9 @@ const sections: Section[] = [
   { id: 'business', title: 'Business', icon: 'briefcase-outline', route: '/business', color: '#EF4444', storageKey: 'business' },
   { id: 'content', title: 'Content', icon: 'create-outline', route: '/content-creation', color: '#84CC16', storageKey: 'content_creation' },
   { id: 'website', title: 'Website', icon: 'globe-outline', route: '/website', color: '#F97316', storageKey: 'website' },
+  { id: 'reference', title: 'Reference', icon: 'book-outline', route: '/reference', color: '#0EA5E9', storageKey: 'reference' },
   { id: 'marketing', title: 'Marketing', icon: 'megaphone-outline', route: '/marketing', color: '#14B8A6', storageKey: 'marketing' },
+  { id: 'notes', title: 'Notes', icon: 'document-text-outline', route: '/notes', color: '#A78BFA', storageKey: 'notes' },
 ];
 
 const menuSections: MenuSection[] = [

@@ -268,11 +268,8 @@ export default function MarketingScreen() {
 
   const toggleFavorite = async (item: MarketingItem) => {
     const nextFavorite = !(item.isFavorite ?? false);
-    await marketingStorage.update(item.id, {
-      isFavorite: nextFavorite,
-      favoritedAt: nextFavorite ? Date.now() : undefined,
-    });
 
+    // Optimistic update so favorites feel instant in list and gallery.
     setItems(prev =>
       prev.map(existing =>
         existing.id === item.id
@@ -284,6 +281,26 @@ export default function MarketingScreen() {
           : existing,
       ),
     );
+
+    try {
+      await marketingStorage.update(item.id, {
+        isFavorite: nextFavorite,
+        favoritedAt: nextFavorite ? Date.now() : undefined,
+      });
+    } catch {
+      // Revert if persistence fails.
+      setItems(prev =>
+        prev.map(existing =>
+          existing.id === item.id
+            ? {
+                ...existing,
+                isFavorite: item.isFavorite ?? false,
+                favoritedAt: item.favoritedAt,
+              }
+            : existing,
+        ),
+      );
+    }
   };
 
   const onFavoritePress = (event: GestureResponderEvent, item: MarketingItem) => {
@@ -507,6 +524,7 @@ export default function MarketingScreen() {
                 style={[styles.galleryFavoriteButton, { backgroundColor: 'rgba(0,0,0,0.45)' }]}
                 onPress={(event) => onFavoritePress(event, item)}
                 activeOpacity={0.8}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <Ionicons
                   name={(item.isFavorite ?? false) ? 'heart' : 'heart-outline'}
