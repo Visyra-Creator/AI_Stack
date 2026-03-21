@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,40 +11,55 @@ import {
   Platform,
   RefreshControl,
   Image,
+  TextInput,
+  FlatList,
+  useWindowDimensions,
+  GestureResponderEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '@/src/context/ThemeContext';
 import { Card } from '@/src/components/common/Card';
 import { FormInput } from '@/src/components/common/FormInput';
 import { Select } from '@/src/components/common/Select';
 import { Button } from '@/src/components/common/Button';
 import { EmptyState } from '@/src/components/common/EmptyState';
-import { marketingStorage, MarketingItem } from '@/src/services/storage';
+import { marketingStorage, marketingCategoryStorage, MarketingItem } from '@/src/services/storage';
 
-const CATEGORIES = [
-  'Social Media',
-  'Email Marketing',
-  'SEO',
-  'Content Marketing',
-  'Paid Ads',
-  'Analytics',
-  'Automation',
-  'Design',
-  'Other',
-];
+const SORT_OPTIONS = [
+  { label: 'Recent', value: 'recent' },
+  { label: 'Name', value: 'name' },
+  { label: 'Category', value: 'category' },
+] as const;
+
+type SortValue = (typeof SORT_OPTIONS)[number]['value'];
+type ViewMode = 'normal' | 'gallery';
 
 export default function MarketingScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { width: windowWidth } = useWindowDimensions();
+  const galleryColumns = 4;
+  const gap = 1;
+  const galleryCardWidth = (windowWidth - (galleryColumns - 1) * gap) / galleryColumns;
   const [items, setItems] = useState<MarketingItem[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingItem, setEditingItem] = useState<MarketingItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [filterCategory, setFilterCategory] = useState('All');
+  const [categories, setCategories] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeFilter, setActiveFilter] = useState('All');
+  const [activeSort, setActiveSort] = useState<SortValue>('recent');
+  const [viewMode, setViewMode] = useState<ViewMode>('normal');
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
+  const [sortModalVisible, setSortModalVisible] = useState(false);
+  const [categoriesModalVisible, setCategoriesModalVisible] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState('');
 
   const [formData, setFormData] = useState({
     name: '',
@@ -53,6 +68,7 @@ export default function MarketingScreen() {
     category: '',
     instructions: '',
     link: '',
+    image: undefined as string | undefined,
     file: undefined as string | undefined,
   });
 
@@ -61,14 +77,128 @@ export default function MarketingScreen() {
     setItems(data);
   }, []);
 
+  const loadCategories = useCallback(async () => {
+    const data = await marketingCategoryStorage.getAll();
+    setCategories(data);
+  }, []);
+
   useEffect(() => {
     loadItems();
-  }, [loadItems]);
+    loadCategories();
+  }, [loadItems, loadCategories]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadItems();
+    await Promise.all([loadItems(), loadCategories()]);
     setRefreshing(false);
+  };
+
+  const normalizeCategory = (value: string) => value.trim();
+
+  const addCategory = async () => {
+    const value = normalizeCategory(newCategoryName);
+    if (!value) {
+      Alert.alert('Error', 'Category name cannot be empty');
+      return;
+    }
+
+    if (categories.some(category => category.toLowerCase() === value.toLowerCase())) {
+      Alert.alert('Error', 'Category already exists');
+      return;
+    }
+
+    const updatedCategories = [...categories, value];
+    await marketingCategoryStorage.saveAll(updatedCategories);
+    setCategories(updatedCategories);
+    setNewCategoryName('');
+  };
+
+  const startEditCategory = (category: string) => {
+    setEditingCategory(category);
+    setEditingCategoryName(category);
+  };
+
+  const saveEditedCategory = async () => {
+    if (!editingCategory) return;
+
+    const value = normalizeCategory(editingCategoryName);
+    if (!value) {
+      Alert.alert('Error', 'Category name cannot be empty');
+      return;
+    }
+
+    if (
+      categories.some(
+        category =>
+          category.toLowerCase() === value.toLowerCase() &&
+          category.toLowerCase() !== editingCategory.toLowerCase(),
+      )
+    ) {
+      Alert.alert('Error', 'Category already exists');
+      return;
+    }
+
+    const updatedCategories = categories.map(category =>
+      category === editingCategory ? value : category,
+    );
+    await marketingCategoryStorage.saveAll(updatedCategories);
+    setCategories(updatedCategories);
+
+    const allItems = await marketingStorage.getAll();
+    const affectedItems = allItems.filter(item => item.category === editingCategory);
+    await Promise.all(
+      affectedItems.map(item => marketingStorage.update(item.id, { category: value })),
+    );
+
+    if (activeFilter === editingCategory) {
+      setActiveFilter(value);
+    }
+    if (formData.category === editingCategory) {
+      setFormData(prev => ({ ...prev, category: value }));
+    }
+
+    setEditingCategory(null);
+    setEditingCategoryName('');
+    await loadItems();
+  };
+
+  const deleteCategory = (categoryToDelete: string) => {
+    Alert.alert(
+      'Delete Category',
+      `Delete "${categoryToDelete}"? This removes it from existing tools too.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const updatedCategories = categories.filter(category => category !== categoryToDelete);
+            await marketingCategoryStorage.saveAll(updatedCategories);
+            setCategories(updatedCategories);
+
+            const allItems = await marketingStorage.getAll();
+            const affectedItems = allItems.filter(item => item.category === categoryToDelete);
+            await Promise.all(
+              affectedItems.map(item => marketingStorage.update(item.id, { category: '' })),
+            );
+
+            if (activeFilter === categoryToDelete) {
+              setActiveFilter('All');
+            }
+            if (formData.category === categoryToDelete) {
+              setFormData(prev => ({ ...prev, category: '' }));
+            }
+
+            if (editingCategory === categoryToDelete) {
+              setEditingCategory(null);
+              setEditingCategoryName('');
+            }
+
+            await loadItems();
+          },
+        },
+      ],
+    );
   };
 
   const resetForm = () => {
@@ -79,6 +209,7 @@ export default function MarketingScreen() {
       category: '',
       instructions: '',
       link: '',
+      image: undefined,
       file: undefined,
     });
     setEditingItem(null);
@@ -98,6 +229,7 @@ export default function MarketingScreen() {
       category: item.category,
       instructions: item.instructions,
       link: item.link,
+      image: item.image,
       file: item.file,
     });
     setModalVisible(true);
@@ -134,6 +266,31 @@ export default function MarketingScreen() {
     ]);
   };
 
+  const toggleFavorite = async (item: MarketingItem) => {
+    const nextFavorite = !(item.isFavorite ?? false);
+    await marketingStorage.update(item.id, {
+      isFavorite: nextFavorite,
+      favoritedAt: nextFavorite ? Date.now() : undefined,
+    });
+
+    setItems(prev =>
+      prev.map(existing =>
+        existing.id === item.id
+          ? {
+              ...existing,
+              isFavorite: nextFavorite,
+              favoritedAt: nextFavorite ? Date.now() : undefined,
+            }
+          : existing,
+      ),
+    );
+  };
+
+  const onFavoritePress = (event: GestureResponderEvent, item: MarketingItem) => {
+    event.stopPropagation();
+    toggleFavorite(item);
+  };
+
   const pickFile = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -153,6 +310,31 @@ export default function MarketingScreen() {
     }
   };
 
+  const pickImage = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 0.9,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        setFormData({
+          ...formData,
+          image: JSON.stringify({
+            name: asset.fileName || `image-${Date.now()}`,
+            uri: asset.uri,
+            width: asset.width,
+            height: asset.height,
+          }),
+        });
+      }
+    } catch (error) {
+      console.log('Error picking image:', error);
+    }
+  };
+
   const getFileName = (fileStr?: string): string | null => {
     if (!fileStr) return null;
     try {
@@ -163,11 +345,64 @@ export default function MarketingScreen() {
     }
   };
 
-  const filteredItems = filterCategory === 'All'
-    ? items
-    : items.filter(item => item.category === filterCategory);
+  const getImageUri = (imageStr?: string): string | null => {
+    if (!imageStr) return null;
+    try {
+      const parsed = JSON.parse(imageStr);
+      return parsed.uri || null;
+    } catch {
+      return null;
+    }
+  };
 
-  const uniqueCategories = ['All', ...new Set(items.map(item => item.category).filter(Boolean))];
+  const getCardSubtitle = (item: MarketingItem) => {
+    const raw = (item.description?.trim() || '').trim();
+    if (!raw) return '';
+    return raw.split('\n')[0].trim();
+  };
+
+  const filteredItems = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+
+    return items.filter(item => {
+      const matchesSearch =
+        !query ||
+        item.name.toLowerCase().includes(query) ||
+        item.description.toLowerCase().includes(query) ||
+        item.instructions.toLowerCase().includes(query) ||
+        item.toolLink.toLowerCase().includes(query) ||
+        item.link.toLowerCase().includes(query) ||
+        item.category.toLowerCase().includes(query);
+
+      const matchesFilter =
+        activeFilter === 'All' ||
+        (activeFilter === 'Favorites' ? (item.isFavorite ?? false) : item.category === activeFilter);
+      return matchesSearch && matchesFilter;
+    });
+  }, [items, searchQuery, activeFilter]);
+
+  const displayedItems = useMemo(() => {
+    const sorted = [...filteredItems];
+    if (activeSort === 'name') {
+      sorted.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (activeSort === 'category') {
+      sorted.sort((a, b) => a.category.localeCompare(b.category));
+    } else {
+      sorted.sort((a, b) => b.createdAt - a.createdAt);
+    }
+    return sorted;
+  }, [filteredItems, activeSort]);
+
+  const uniqueCategories = [
+    'All',
+    'Favorites',
+    ...new Set([...categories, ...items.map(item => item.category).filter(Boolean)]),
+  ];
+  const isFavoritesOnly = activeFilter === 'Favorites';
+
+  const toggleFavoritesOnly = () => {
+    setActiveFilter(prev => (prev === 'Favorites' ? 'All' : 'Favorites'));
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -181,27 +416,66 @@ export default function MarketingScreen() {
         </TouchableOpacity>
       </View>
 
-      {items.length > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsContainer}>
-          {uniqueCategories.map(category => (
-            <TouchableOpacity
-              key={category}
-              style={[
-                styles.tab,
-                filterCategory === category && { backgroundColor: colors.primary },
-                { borderColor: colors.border },
-              ]}
-              onPress={() => setFilterCategory(category)}
-            >
-              <Text style={[styles.tabText, { color: filterCategory === category ? '#FFFFFF' : colors.text }]}>
-                {category}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      )}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchRow}>
+          <View style={[styles.searchBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Ionicons name="search" size={18} color={colors.textSecondary} />
+            <TextInput
+              placeholder="Search tools..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              style={[styles.searchInput, { color: colors.text }]}
+              placeholderTextColor={colors.textSecondary}
+            />
+          </View>
+          <TouchableOpacity
+            style={[styles.controlButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={() => setFilterModalVisible(true)}
+          >
+            <Ionicons name="funnel-outline" size={16} color={colors.textSecondary} />
+            <Text style={[styles.controlButtonText, { color: colors.text }]} numberOfLines={1}>
+              {activeFilter}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.favoriteFilterButton,
+              {
+                backgroundColor: isFavoritesOnly ? colors.primary + '20' : colors.surface,
+                borderColor: isFavoritesOnly ? colors.primary : colors.border,
+              },
+            ]}
+            onPress={toggleFavoritesOnly}
+          >
+            <Ionicons
+              name={isFavoritesOnly ? 'heart' : 'heart-outline'}
+              size={16}
+              color={isFavoritesOnly ? colors.primary : colors.textSecondary}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.controlButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={() => setSortModalVisible(true)}
+          >
+            <Ionicons name="swap-vertical-outline" size={16} color={colors.textSecondary} />
+            <Text style={[styles.controlButtonText, { color: colors.text }]} numberOfLines={1}>
+              {SORT_OPTIONS.find(option => option.value === activeSort)?.label}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.controlButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={() => setViewMode(prev => (prev === 'normal' ? 'gallery' : 'normal'))}
+          >
+            <Ionicons
+              name={viewMode === 'normal' ? 'grid-outline' : 'list-outline'}
+              size={16}
+              color={colors.textSecondary}
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
 
-      {filteredItems.length === 0 ? (
+      {displayedItems.length === 0 ? (
         <EmptyState
           icon="megaphone-outline"
           title="No Marketing Tools"
@@ -209,20 +483,71 @@ export default function MarketingScreen() {
           actionLabel="Add Tool"
           onAction={openAddModal}
         />
+      ) : viewMode === 'gallery' ? (
+        <FlatList
+          style={styles.list}
+          contentContainerStyle={styles.galleryListContent}
+          data={displayedItems}
+          key={`gallery-${galleryColumns}`}
+          numColumns={galleryColumns}
+          keyExtractor={(item) => item.id}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          showsVerticalScrollIndicator={false}
+          columnWrapperStyle={styles.galleryColumnWrapper}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={[
+                styles.galleryCard,
+                { width: galleryCardWidth, backgroundColor: colors.card, borderColor: colors.border },
+              ]}
+              onPress={() => openEditModal(item)}
+              activeOpacity={0.85}
+            >
+              <TouchableOpacity
+                style={[styles.galleryFavoriteButton, { backgroundColor: 'rgba(0,0,0,0.45)' }]}
+                onPress={(event) => onFavoritePress(event, item)}
+                activeOpacity={0.8}
+              >
+                <Ionicons
+                  name={(item.isFavorite ?? false) ? 'heart' : 'heart-outline'}
+                  size={16}
+                  color={(item.isFavorite ?? false) ? '#FF6B6B' : '#FFFFFF'}
+                />
+              </TouchableOpacity>
+              {getImageUri(item.image) ? (
+                <Image source={{ uri: getImageUri(item.image) as string }} style={styles.galleryImage} resizeMode="cover" />
+              ) : (
+                <View style={[styles.galleryPlaceholder, { backgroundColor: colors.surface }]}>
+                  <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
+                </View>
+              )}
+              <View style={styles.galleryOverlay}>
+                <Text style={styles.galleryTitle} numberOfLines={1}>{item.name}</Text>
+                <Text style={styles.gallerySubtitle} numberOfLines={1}>{getCardSubtitle(item)}</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+        />
       ) : (
         <ScrollView
           style={styles.list}
+          contentContainerStyle={styles.listContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
-          {filteredItems.map(item => (
+          {displayedItems.map(item => (
             <Card
               key={item.id}
               title={item.name}
               subtitle={item.description}
               tags={item.category ? [item.category] : []}
+              onFavorite={() => toggleFavorite(item)}
+              isFavorite={item.isFavorite ?? false}
               onEdit={() => openEditModal(item)}
               onDelete={() => handleDelete(item)}
             >
+              {getImageUri(item.image) && (
+                <Image source={{ uri: getImageUri(item.image) as string }} style={styles.cardImage} resizeMode="cover" />
+              )}
               <View style={styles.cardFooter}>
                 {item.toolLink && (
                   <View style={[styles.badge, { backgroundColor: colors.primary + '20' }]}>
@@ -236,11 +561,65 @@ export default function MarketingScreen() {
                     <Text style={[styles.badgeText, { color: colors.success }]}>File</Text>
                   </View>
                 )}
+                {item.image && (
+                  <View style={[styles.badge, { backgroundColor: colors.warning + '20' }]}>
+                    <Ionicons name="image-outline" size={14} color={colors.warning} />
+                    <Text style={[styles.badgeText, { color: colors.warning }]}>Image</Text>
+                  </View>
+                )}
               </View>
             </Card>
           ))}
         </ScrollView>
       )}
+
+      <Modal visible={filterModalVisible} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={[styles.optionSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Filter by Category</Text>
+            {uniqueCategories.map(option => (
+              <TouchableOpacity
+                key={option}
+                style={styles.optionRow}
+                onPress={() => {
+                  setActiveFilter(option);
+                  setFilterModalVisible(false);
+                }}
+              >
+                <Text style={[styles.optionText, { color: colors.text }]}>{option}</Text>
+                {activeFilter === option && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity onPress={() => setFilterModalVisible(false)} style={styles.optionClose}>
+              <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={sortModalVisible} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={[styles.optionSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Sort by</Text>
+            {SORT_OPTIONS.map(option => (
+              <TouchableOpacity
+                key={option.value}
+                style={styles.optionRow}
+                onPress={() => {
+                  setActiveSort(option.value);
+                  setSortModalVisible(false);
+                }}
+              >
+                <Text style={[styles.optionText, { color: colors.text }]}>{option.label}</Text>
+                {activeSort === option.value && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity onPress={() => setSortModalVisible(false)} style={styles.optionClose}>
+              <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet">
         <KeyboardAvoidingView
@@ -285,10 +664,17 @@ export default function MarketingScreen() {
             />
             <Select
               label="Category"
-              options={CATEGORIES}
+              options={categories}
               value={formData.category}
               onChange={(category) => setFormData({ ...formData, category })}
             />
+            <TouchableOpacity
+              style={[styles.manageCategoriesButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={() => setCategoriesModalVisible(true)}
+            >
+              <Ionicons name="settings-outline" size={16} color={colors.textSecondary} />
+              <Text style={[styles.manageCategoriesText, { color: colors.text }]}>Manage Categories</Text>
+            </TouchableOpacity>
             <FormInput
               label="Instructions"
               placeholder="How to use for marketing..."
@@ -306,6 +692,29 @@ export default function MarketingScreen() {
               keyboardType="url"
               autoCapitalize="none"
             />
+
+            <View style={styles.uploadSection}>
+              <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>Upload Image</Text>
+              <TouchableOpacity
+                style={[styles.uploadButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={pickImage}
+              >
+                <Ionicons name="image-outline" size={18} color={colors.textSecondary} />
+                <Text style={[styles.uploadButtonText, { color: colors.text }]}>Select Image</Text>
+              </TouchableOpacity>
+
+              {getImageUri(formData.image) && (
+                <View style={styles.imagePreviewWrap}>
+                  <Image source={{ uri: getImageUri(formData.image) as string }} style={styles.imagePreview} resizeMode="cover" />
+                  <TouchableOpacity
+                    style={[styles.imageRemoveButton, { backgroundColor: colors.background }]}
+                    onPress={() => setFormData({ ...formData, image: undefined })}
+                  >
+                    <Ionicons name="close-circle" size={18} color={colors.danger} />
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
 
             <View style={styles.fileSection}>
               <Text style={[styles.fileLabel, { color: colors.textSecondary }]}>File Upload</Text>
@@ -326,6 +735,73 @@ export default function MarketingScreen() {
             <View style={styles.bottomPadding} />
           </ScrollView>
         </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal visible={categoriesModalVisible} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={[styles.optionSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Manage Categories</Text>
+
+            <View style={[styles.categoryInputRow, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+              <TextInput
+                value={newCategoryName}
+                onChangeText={setNewCategoryName}
+                placeholder="New category"
+                placeholderTextColor={colors.textSecondary}
+                style={[styles.categoryInput, { color: colors.text }]}
+              />
+              <TouchableOpacity
+                style={[styles.categoryActionButton, { backgroundColor: colors.primary }]}
+                onPress={addCategory}
+              >
+                <Ionicons name="add" size={16} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.categoriesList}>
+              {categories.map(category => (
+                <View key={category} style={[styles.categoryRow, { borderBottomColor: colors.border }]}>
+                  {editingCategory === category ? (
+                    <TextInput
+                      value={editingCategoryName}
+                      onChangeText={setEditingCategoryName}
+                      style={[styles.categoryEditInput, { color: colors.text, borderColor: colors.border }]}
+                    />
+                  ) : (
+                    <Text style={[styles.optionText, { color: colors.text }]}>{category}</Text>
+                  )}
+
+                  <View style={styles.categoryActions}>
+                    {editingCategory === category ? (
+                      <TouchableOpacity onPress={saveEditedCategory} style={styles.categoryIconButton}>
+                        <Ionicons name="checkmark" size={18} color={colors.success} />
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity onPress={() => startEditCategory(category)} style={styles.categoryIconButton}>
+                        <Ionicons name="create-outline" size={17} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity onPress={() => deleteCategory(category)} style={styles.categoryIconButton}>
+                      <Ionicons name="trash-outline" size={17} color={colors.danger} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              onPress={() => {
+                setCategoriesModalVisible(false);
+                setEditingCategory(null);
+                setEditingCategoryName('');
+                setNewCategoryName('');
+              }}
+              style={styles.optionClose}
+            >
+              <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -356,28 +832,136 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tabsContainer: {
+  searchContainer: {
     paddingHorizontal: 16,
-    marginBottom: 16,
-    maxHeight: 44,
+    marginBottom: 12,
   },
-  tab: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 8,
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  searchBox: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 10,
   },
-  tabText: {
+  searchInput: {
+    flex: 1,
     fontSize: 14,
+    paddingVertical: 9,
+    paddingLeft: 8,
+  },
+  controlButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 4,
+  },
+  favoriteFilterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 4,
+  },
+  controlButtonText: {
+    fontSize: 12,
+    fontWeight: '500',
+    maxWidth: 62,
+  },
+  manageCategoriesButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+    gap: 8,
+  },
+  manageCategoriesText: {
+    fontSize: 13,
     fontWeight: '500',
   },
   list: {
     flex: 1,
+  },
+  listContent: {
     paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  galleryListContent: {
+    paddingBottom: 12,
+  },
+  galleryColumnWrapper: {
+    gap: 1,
+  },
+  galleryCard: {
+    aspectRatio: 1,
+    borderWidth: 1,
+    overflow: 'hidden',
+    position: 'relative',
+    marginBottom: 1,
+  },
+  galleryImage: {
+    width: '100%',
+    height: '100%',
+  },
+  galleryPlaceholder: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  galleryFavoriteButton: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 5,
+  },
+  galleryOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  galleryTitle: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  gallerySubtitle: {
+    color: '#D1D5DB',
+    fontSize: 10,
+    marginTop: 2,
+  },
+  cardImage: {
+    width: '100%',
+    height: 140,
+    borderRadius: 10,
+    marginTop: 12,
+    marginBottom: 4,
   },
   cardFooter: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     marginTop: 12,
   },
@@ -423,6 +1007,44 @@ const styles = StyleSheet.create({
     minHeight: 100,
     textAlignVertical: 'top',
   },
+  uploadSection: {
+    marginBottom: 16,
+  },
+  uploadLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  uploadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  uploadButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  imagePreviewWrap: {
+    marginTop: 10,
+    width: 120,
+    height: 120,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  imagePreview: {
+    width: '100%',
+    height: '100%',
+  },
+  imageRemoveButton: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    borderRadius: 12,
+  },
   fileSection: {
     marginBottom: 16,
   },
@@ -443,6 +1065,90 @@ const styles = StyleSheet.create({
   fileName: {
     flex: 1,
     fontSize: 14,
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  optionSheet: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 14,
+    maxHeight: '75%',
+  },
+  optionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  optionText: {
+    fontSize: 14,
+  },
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+  },
+  optionClose: {
+    marginTop: 12,
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  optionCloseText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  categoryInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingLeft: 10,
+    marginBottom: 10,
+  },
+  categoryInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 10,
+    paddingRight: 8,
+  },
+  categoryActionButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 6,
+  },
+  categoriesList: {
+    maxHeight: 260,
+  },
+  categoryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  categoryEditInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 14,
+    marginRight: 10,
+  },
+  categoryActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  categoryIconButton: {
+    padding: 4,
   },
   bottomPadding: {
     height: 40,

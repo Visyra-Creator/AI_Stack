@@ -17,6 +17,7 @@ const STORAGE_KEYS = {
   CONTENT_CREATION_CATEGORIES: 'content_creation_categories',
   WEBSITE: 'website',
   MARKETING: 'marketing',
+  MARKETING_CATEGORIES: 'marketing_categories',
 };
 
 const DEFAULT_AI_STACK_CATEGORIES = [
@@ -55,6 +56,18 @@ const DEFAULT_LEAD_GENERATION_CATEGORIES = [
   'Social Media',
   'Content Marketing',
   'Affiliate',
+  'Other',
+];
+
+const DEFAULT_MARKETING_CATEGORIES = [
+  'Social Media',
+  'Email Marketing',
+  'SEO',
+  'Content Marketing',
+  'Paid Ads',
+  'Analytics',
+  'Automation',
+  'Design',
   'Other',
 ];
 
@@ -190,6 +203,7 @@ export interface WebsiteItem {
   toolLink: string;
   description: string;
   category: string;
+  isFavorite?: boolean;
   createdAt: number;
   updatedAt?: number;
   favoritedAt?: number;
@@ -203,6 +217,8 @@ export interface MarketingItem {
   category: string;
   instructions: string;
   link: string;
+  isFavorite?: boolean;
+  image?: string;
   file?: string;
   createdAt: number;
   updatedAt?: number;
@@ -415,6 +431,19 @@ export const websiteStorage = {
   delete: (id: string) => deleteItem<WebsiteItem>(STORAGE_KEYS.WEBSITE, id),
 };
 
+export const websiteCategoryStorage = {
+  getAll: async (): Promise<string[]> => {
+    const categories = await getItems<string>(STORAGE_KEYS.WEBSITE + '_CATEGORIES');
+    if (categories.length === 0) {
+      const defaultCategories = ['AI Tool', 'Productivity', 'Design', 'Development', 'Marketing', 'Social Media', 'Analytics', 'Communication', 'Finance', 'Other'];
+      await saveItems(STORAGE_KEYS.WEBSITE + '_CATEGORIES', defaultCategories);
+      return defaultCategories;
+    }
+    return categories;
+  },
+  saveAll: (categories: string[]) => saveItems(STORAGE_KEYS.WEBSITE + '_CATEGORIES', categories),
+};
+
 // Marketing
 export const marketingStorage = {
   getAll: () => getItems<MarketingItem>(STORAGE_KEYS.MARKETING),
@@ -422,3 +451,16 @@ export const marketingStorage = {
   update: (id: string, updates: Partial<MarketingItem>) => updateItem<MarketingItem>(STORAGE_KEYS.MARKETING, id, updates),
   delete: (id: string) => deleteItem<MarketingItem>(STORAGE_KEYS.MARKETING, id),
 };
+
+export const marketingCategoryStorage = {
+  getAll: async (): Promise<string[]> => {
+    const categories = await getItems<string>(STORAGE_KEYS.MARKETING_CATEGORIES);
+    if (categories.length === 0) {
+      await saveItems(STORAGE_KEYS.MARKETING_CATEGORIES, DEFAULT_MARKETING_CATEGORIES);
+      return DEFAULT_MARKETING_CATEGORIES;
+    }
+    return categories;
+  },
+  saveAll: (categories: string[]) => saveItems(STORAGE_KEYS.MARKETING_CATEGORIES, categories),
+};
+
