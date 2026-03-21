@@ -74,6 +74,8 @@ export interface AIStackItem {
   instructions: string;
   isFavorite?: boolean;
   createdAt: number;
+  updatedAt?: number;
+  favoritedAt?: number;
 }
 
 export interface PromptItem {
@@ -88,6 +90,8 @@ export interface PromptItem {
   type: 'general' | 'personal';
   isFavorite?: boolean;
   createdAt: number;
+  updatedAt?: number;
+  favoritedAt?: number;
 }
 
 export interface ToolItem {
@@ -99,6 +103,8 @@ export interface ToolItem {
   image?: string;
   isFavorite?: boolean;
   createdAt: number;
+  updatedAt?: number;
+  favoritedAt?: number;
 }
 
 export interface TutorialItem {
@@ -110,6 +116,8 @@ export interface TutorialItem {
   files: string[];
   isFavorite?: boolean;
   createdAt: number;
+  updatedAt?: number;
+  favoritedAt?: number;
 }
 
 export interface OpenSourceItem {
@@ -123,6 +131,8 @@ export interface OpenSourceItem {
   files?: string[];
   isFavorite?: boolean;
   createdAt: number;
+  updatedAt?: number;
+  favoritedAt?: number;
 }
 
 export interface LeadGenerationItem {
@@ -137,6 +147,8 @@ export interface LeadGenerationItem {
   images?: string[];
   files?: string[];
   createdAt: number;
+  updatedAt?: number;
+  favoritedAt?: number;
 }
 
 export interface BusinessItem {
@@ -151,6 +163,8 @@ export interface BusinessItem {
   files?: string[];
   isFavorite?: boolean;
   createdAt: number;
+  updatedAt?: number;
+  favoritedAt?: number;
 }
 
 export interface ContentCreationItem {
@@ -161,9 +175,13 @@ export interface ContentCreationItem {
   instructions: string;
   videoLink?: string;
   videoFile?: string;
+  images?: string[];
+  files?: string[];
   categories?: string[];
   isFavorite?: boolean;
   createdAt: number;
+  updatedAt?: number;
+  favoritedAt?: number;
 }
 
 export interface WebsiteItem {
@@ -173,6 +191,8 @@ export interface WebsiteItem {
   description: string;
   category: string;
   createdAt: number;
+  updatedAt?: number;
+  favoritedAt?: number;
 }
 
 export interface MarketingItem {
@@ -185,6 +205,8 @@ export interface MarketingItem {
   link: string;
   file?: string;
   createdAt: number;
+  updatedAt?: number;
+  favoritedAt?: number;
 }
 
 const generateId = (): string => {
@@ -212,7 +234,14 @@ async function saveItems<T>(key: string, items: T[]): Promise<void> {
 
 async function addItem<T extends { id: string; createdAt: number }>(key: string, item: Omit<T, 'id' | 'createdAt'>): Promise<T> {
   const items = await getItems<T>(key);
-  const newItem = { ...item, id: generateId(), createdAt: Date.now() } as T;
+  const now = Date.now();
+  const newItem = { 
+    ...item, 
+    id: generateId(), 
+    createdAt: now,
+    updatedAt: now,
+    ...((item as any).isFavorite ? { favoritedAt: now } : {})
+  } as unknown as T;
   items.unshift(newItem);
   await saveItems(key, items);
   return newItem;
@@ -222,6 +251,14 @@ async function updateItem<T extends { id: string }>(key: string, id: string, upd
   const items = await getItems<T>(key);
   const index = items.findIndex(item => item.id === id);
   if (index !== -1) {
+    if ('isFavorite' in updates) {
+      if (updates.isFavorite) {
+        (updates as any).favoritedAt = Date.now();
+      } else {
+        (updates as any).favoritedAt = undefined;
+      }
+    }
+    (updates as any).updatedAt = Date.now();
     items[index] = { ...items[index], ...updates };
     await saveItems(key, items);
   }

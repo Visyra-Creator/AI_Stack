@@ -13,6 +13,8 @@ import {
   RefreshControl,
   FlatList,
   useWindowDimensions,
+  Linking,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -23,6 +25,8 @@ import { FormInput } from '@/src/components/common/FormInput';
 import { MultiSelect } from '@/src/components/common/MultiSelect';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { contentCreationStorage, contentCreationCategoryStorage, ContentCreationItem } from '@/src/services/storage';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -44,6 +48,8 @@ export default function ContentCreationScreen() {
   const galleryCardWidth = (windowWidth - (galleryColumns - 1) * gap) / galleryColumns;
   
   const [modalVisible, setModalVisible] = useState(false);
+  const [detailsVisible, setDetailsVisible] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<ContentCreationItem | null>(null);
   const [editingItem, setEditingItem] = useState<ContentCreationItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -69,6 +75,8 @@ export default function ContentCreationScreen() {
     description: '',
     instructions: '',
     videoLink: '',
+    images: [] as string[],
+    files: [] as string[],
   });
 
   const loadItems = useCallback(async () => {
@@ -224,6 +232,8 @@ export default function ContentCreationScreen() {
       description: '',
       instructions: '',
       videoLink: '',
+      images: [],
+      files: [],
     });
     setEditingItem(null);
   };
@@ -237,13 +247,114 @@ export default function ContentCreationScreen() {
     setEditingItem(item);
     setFormData({
       toolName: item.toolName,
-      toolLink: item.toolLink,
+      toolLink: item.toolLink || '',
       categories: item.categories || [],
-      description: item.description,
-      instructions: item.instructions,
+      description: item.description || '',
+      instructions: item.instructions || '',
       videoLink: item.videoLink || '',
+      images: item.images || [],
+      files: item.files || [],
     });
     setModalVisible(true);
+  };
+
+  const openDetailsModal = (item: ContentCreationItem) => {
+    setSelectedItem(item);
+    setDetailsVisible(true);
+  };
+
+  const openEditFromDetails = () => {
+    if (selectedItem) {
+      setDetailsVisible(false);
+      openEditModal(selectedItem);
+    }
+  };
+
+  const openExternalLink = async (url: string) => {
+    try {
+      if (await Linking.canOpenURL(url)) {
+        await Linking.openURL(url);
+      } else {
+        Alert.alert('Error', 'Cannot open this link.');
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const pickImages = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission required', 'Please allow photo library access to upload images.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        quality: 1,
+      });
+
+      if (!result.canceled) {
+        const newImages = result.assets.map(asset => 
+          JSON.stringify({
+            name: asset.fileName || `Image ${Date.now()}`,
+            uri: asset.uri,
+            width: asset.width,
+            height: asset.height,
+          })
+        );
+        
+        // @ts-ignore
+        setFormData(prev => ({ ...prev, images: [...(prev.images || []), ...newImages] }));
+      }
+    } catch (error) {
+      console.error('Error picking images:', error);
+      Alert.alert('Error', 'Failed to pick images');
+    }
+  };
+
+  const removeImage = (indexToRemove: number) => {
+    setFormData(prev => ({
+      ...prev,
+      // @ts-ignore
+      images: (prev.images || []).filter((_, index) => index !== indexToRemove),
+    }));
+  };
+
+  const pickFiles = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        multiple: true,
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled) {
+        const newFiles = result.assets.map(asset => 
+          JSON.stringify({
+            name: asset.name,
+            uri: asset.uri,
+            size: asset.size,
+            mimeType: asset.mimeType,
+          })
+        );
+        
+        // @ts-ignore
+        setFormData(prev => ({ ...prev, files: [...(prev.files || []), ...newFiles] }));
+      }
+    } catch (error) {
+      console.error('Error picking files:', error);
+      Alert.alert('Error', 'Failed to pick files');
+    }
+  };
+
+  const removeFile = (indexToRemove: number) => {
+    setFormData(prev => ({
+      ...prev,
+      // @ts-ignore
+      files: (prev.files || []).filter((_, index) => index !== indexToRemove),
+    }));
   };
 
   const handleSave = async () => {
@@ -401,6 +512,7 @@ export default function ContentCreationScreen() {
               key={item.id}
               title={item.toolName}
               subtitle={item.description}
+              onPress={() => openDetailsModal(item)}
               onFavorite={() => toggleFavorite(item)}
               isFavorite={item.isFavorite ?? false}
               onEdit={() => openEditModal(item)}
@@ -427,6 +539,18 @@ export default function ContentCreationScreen() {
                       <Text style={[styles.badgeText, { color: colors.danger }]}>Video</Text>
                     </View>
                   )}
+                  {item.images && item.images.length > 0 && (
+                    <View style={[styles.badge, { backgroundColor: colors.warning + '20' }]}>
+                      <Ionicons name="image-outline" size={14} color={colors.warning} />
+                      <Text style={[styles.badgeText, { color: colors.warning }]}>{item.images.length} Image(s)</Text>
+                    </View>
+                  )}
+                  {item.files && item.files.length > 0 && (
+                    <View style={[styles.badge, { backgroundColor: colors.primary + '20' }]}>
+                      <Ionicons name="document-outline" size={14} color={colors.primary} />
+                      <Text style={[styles.badgeText, { color: colors.primary }]}>{item.files.length} File(s)</Text>
+                    </View>
+                  )}
                 </View>
               </View>
             </Card>
@@ -443,38 +567,53 @@ export default function ContentCreationScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.galleryListContent}
           columnWrapperStyle={styles.galleryColumnWrapper}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[
-                styles.galleryCard,
-                { width: galleryCardWidth, backgroundColor: colors.card, borderColor: colors.border },
-              ]}
-              onPress={() => openEditModal(item)}
-              activeOpacity={0.85}
-            >
+          renderItem={({ item }) => {
+            let uri = null;
+            if (item.images && item.images.length > 0) {
+              try {
+                const parsed = typeof item.images[0] === 'string' ? JSON.parse(item.images[0]) : item.images[0];
+                uri = parsed.uri;
+              } catch {}
+            }
+            
+            return (
               <TouchableOpacity
-                style={[styles.galleryFavoriteButton, { backgroundColor: 'rgba(0,0,0,0.45)' }]}
-                onPress={(event) => {
-                  event.stopPropagation();
-                  toggleFavorite(item);
-                }}
-                activeOpacity={0.8}
+                style={[
+                  styles.galleryCard,
+                  { width: galleryCardWidth, backgroundColor: colors.card, borderColor: colors.border },
+                ]}
+                onPress={() => openDetailsModal(item)}
+                activeOpacity={0.85}
               >
-                <Ionicons
-                  name={(item.isFavorite ?? false) ? 'heart' : 'heart-outline'}
-                  size={16}
-                  color={(item.isFavorite ?? false) ? '#FF6B6B' : '#FFFFFF'}
-                />
-              </TouchableOpacity>
-              <View style={[styles.galleryPlaceholder, { backgroundColor: colors.surface }]}>
-                <Ionicons name="create-outline" size={24} color={colors.textSecondary} />
-              </View>
+                <TouchableOpacity
+                  style={[styles.galleryFavoriteButton, { backgroundColor: 'rgba(0,0,0,0.45)' }]}
+                  onPress={(event) => {
+                    event.stopPropagation();
+                    toggleFavorite(item);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name={(item.isFavorite ?? false) ? 'heart' : 'heart-outline'}
+                    size={16}
+                    color={(item.isFavorite ?? false) ? '#FF6B6B' : '#FFFFFF'}
+                  />
+                </TouchableOpacity>
+                
+                {uri ? (
+                  <Image source={{ uri }} style={styles.galleryImage} resizeMode="cover" />
+                ) : (
+                  <View style={[styles.galleryPlaceholder, { backgroundColor: colors.surface }]}>
+                    <Ionicons name="create-outline" size={24} color={colors.textSecondary} />
+                  </View>
+                )}
               <View style={styles.galleryOverlay}>
                 <Text style={styles.galleryTitle} numberOfLines={1}>{item.toolName}</Text>
                 <Text style={styles.gallerySubtitle} numberOfLines={1}>{item.description}</Text>
               </View>
             </TouchableOpacity>
-          )}
+            );
+          }}
         />
       )}
 
@@ -543,17 +682,207 @@ export default function ContentCreationScreen() {
               numberOfLines={4}
               style={styles.textArea}
             />
-            <FormInput
-              label="Video Link"
-              placeholder="YouTube tutorial, etc."
-              value={formData.videoLink}
-              onChangeText={(text) => setFormData({ ...formData, videoLink: text })}
-              keyboardType="url"
-              autoCapitalize="none"
-            />
-            <View style={styles.bottomPadding} />
-          </ScrollView>
+              <FormInput
+                label="Video Link"
+                placeholder="YouTube tutorial, etc."
+                value={formData.videoLink}
+                onChangeText={(text) => setFormData({ ...formData, videoLink: text })}
+                keyboardType="url"
+                autoCapitalize="none"
+              />
+
+              <View style={styles.imageUploadSection}>
+                <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Images</Text>
+                
+                {/* @ts-ignore */}
+                {formData.images && formData.images.length > 0 && (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagePreviewScroll}>
+                    {/* @ts-ignore */}
+                    {formData.images.map((imageStr, index) => {
+                      try {
+                        const img = typeof imageStr === 'string' ? JSON.parse(imageStr) : imageStr;
+                        return (
+                          <View key={index} style={[styles.imagePreviewContainer, { borderColor: colors.border }]}>
+                            <Image source={{ uri: img.uri }} style={styles.imagePreview} />
+                            <TouchableOpacity
+                              style={[styles.removeImageButton, { backgroundColor: colors.danger }]}
+                              onPress={() => removeImage(index)}
+                            >
+                              <Ionicons name="close" size={12} color="#FFFFFF" />
+                            </TouchableOpacity>
+                          </View>
+                        );
+                      } catch (e) { return null; }
+                    })}
+                  </ScrollView>
+                )}
+
+                <TouchableOpacity
+                  style={[styles.attachButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                  onPress={pickImages}
+                >
+                  <Ionicons name="images-outline" size={20} color={colors.primary} />
+                  <Text style={[styles.attachButtonText, { color: colors.text }]}>Add Images</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.fileUploadSection}>
+                <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Files</Text>
+                
+                {/* @ts-ignore */}
+                {formData.files && formData.files.length > 0 && (
+                  <View style={styles.filePreviewContainer}>
+                    {/* @ts-ignore */}
+                    {formData.files.map((fileStr, index) => {
+                      try {
+                        const file = typeof fileStr === 'string' ? JSON.parse(fileStr) : fileStr;
+                        return (
+                          <View key={index} style={[styles.fileItem, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+                            <Ionicons name="document-text-outline" size={20} color={colors.primary} />
+                            <Text style={[styles.fileItemText, { color: colors.text }]} numberOfLines={1}>{file.name}</Text>
+                            <TouchableOpacity
+                              style={styles.removeFileButton}
+                              onPress={() => removeFile(index)}
+                            >
+                              <Ionicons name="close-circle" size={20} color={colors.danger} />
+                            </TouchableOpacity>
+                          </View>
+                        );
+                      } catch (e) { return null; }
+                    })}
+                  </View>
+                )}
+
+                <TouchableOpacity
+                  style={[styles.attachButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                  onPress={pickFiles}
+                >
+                  <Ionicons name="document-attach-outline" size={20} color={colors.primary} />
+                  <Text style={[styles.attachButtonText, { color: colors.text }]}>Add Files</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.bottomPadding} />
+            </ScrollView>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Details Modal */}
+      <Modal visible={detailsVisible} animationType="slide" presentationStyle="pageSheet">
+        <SafeAreaView style={[styles.modalContainer, { backgroundColor: colors.background }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+            <TouchableOpacity onPress={() => setDetailsVisible(false)}>
+              <Text style={[styles.cancelText, { color: colors.textSecondary }]}>Close</Text>
+            </TouchableOpacity>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Content Details</Text>
+            <TouchableOpacity onPress={openEditFromDetails}>
+              <Text style={[styles.saveText, { color: colors.primary }]}>Edit</Text>
+            </TouchableOpacity>
+          </View>
+
+          {selectedItem && (
+            <ScrollView
+              style={styles.detailsScroll}
+              contentContainerStyle={styles.detailsScrollContent}
+              showsVerticalScrollIndicator
+            >
+              <Text style={[styles.detailsTitle, { color: colors.text }]}>{selectedItem.toolName}</Text>
+
+              {selectedItem.categories && selectedItem.categories.length > 0 && (
+                <View style={styles.detailsTags}>
+                  {selectedItem.categories.map((tag, index) => (
+                    <View key={`${tag}-${index}`} style={[styles.detailsTag, { backgroundColor: colors.primary + '20' }]}>
+                      <Text style={[styles.detailsTagText, { color: colors.primary }]}>{tag}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {!!selectedItem.description?.trim() && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Description</Text>
+                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.description}</Text>
+                </View>
+              )}
+
+              {!!selectedItem.instructions?.trim() && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Instructions</Text>
+                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.instructions}</Text>
+                </View>
+              )}
+
+              {!!selectedItem.toolLink?.trim() && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Tool Link</Text>
+                  <TouchableOpacity onPress={() => openExternalLink(selectedItem.toolLink!)}>
+                    <Text style={[styles.detailsLink, { color: colors.primary }]} numberOfLines={2}>
+                      {selectedItem.toolLink}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {!!selectedItem.videoLink?.trim() && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Video Link</Text>
+                  <TouchableOpacity onPress={() => openExternalLink(selectedItem.videoLink!)}>
+                    <Text style={[styles.detailsLink, { color: colors.primary }]} numberOfLines={2}>
+                      {selectedItem.videoLink}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {selectedItem.images && selectedItem.images.length > 0 && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Images</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.detailsImagesRow}>
+                    {selectedItem.images.map((imageStr, index) => {
+                      try {
+                        const parsed = typeof imageStr === 'string' ? JSON.parse(imageStr) : imageStr;
+                        if (!parsed.uri) return null;
+                        return (
+                          <Image
+                            key={`${parsed.uri}-${index}`}
+                            source={{ uri: parsed.uri }}
+                            style={styles.detailsImagePreview}
+                            resizeMode="contain"
+                          />
+                        );
+                      } catch { return null; }
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+
+              {selectedItem.files && selectedItem.files.length > 0 && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Attached Files</Text>
+                  <View style={styles.detailsFilesContainer}>
+                    {selectedItem.files.map((fileStr, index) => {
+                      try {
+                        const parsed = typeof fileStr === 'string' ? JSON.parse(fileStr) : fileStr;
+                        if (!parsed.uri) return null;
+                        return (
+                          <TouchableOpacity
+                            key={`${parsed.uri}-${index}`}
+                            style={[styles.detailsFileItem, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                            onPress={() => openExternalLink(parsed.uri)}
+                          >
+                            <Ionicons name="document-text-outline" size={24} color={colors.primary} />
+                            <Text style={[styles.detailsFileItemText, { color: colors.text }]} numberOfLines={1}>{parsed.name || 'Document'}</Text>
+                            <Ionicons name="open-outline" size={20} color={colors.textSecondary} />
+                          </TouchableOpacity>
+                        );
+                      } catch { return null; }
+                    })}
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+          )}
+        </SafeAreaView>
       </Modal>
 
       {/* Filter Modal */}
@@ -773,6 +1102,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  galleryImage: {
+    width: '100%',
+    height: '100%',
+  },
   galleryOverlay: {
     position: 'absolute',
     left: 0,
@@ -969,5 +1302,145 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 6,
     marginRight: 8,
+  },
+  detailsScroll: {
+    flex: 1,
+  },
+  detailsScrollContent: {
+    padding: 24,
+    paddingBottom: 40,
+  },
+  detailsTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    marginBottom: 16,
+  },
+  detailsTags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 24,
+  },
+  detailsTag: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  detailsTagText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  detailsSection: {
+    marginBottom: 24,
+  },
+  detailsLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  detailsValue: {
+    fontSize: 16,
+    lineHeight: 24,
+  },
+  detailsLink: {
+    fontSize: 16,
+    textDecorationLine: 'underline',
+  },
+  detailsImagesRow: {
+    gap: 12,
+    paddingRight: 24,
+  },
+  detailsImagePreview: {
+    width: 200,
+    height: 150,
+    borderRadius: 8,
+    backgroundColor: '#00000010',
+  },
+  imageUploadSection: {
+    marginBottom: 20,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  imagePreviewScroll: {
+    marginBottom: 12,
+  },
+  imagePreviewContainer: {
+    position: 'relative',
+    marginRight: 12,
+    borderWidth: 1,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  imagePreview: {
+    width: 80,
+    height: 80,
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderRadius: 8,
+    gap: 8,
+  },
+  attachButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  fileUploadSection: {
+    marginBottom: 20,
+    marginTop: 8,
+  },
+  filePreviewContainer: {
+    gap: 8,
+    marginBottom: 12,
+  },
+  fileItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderWidth: 1,
+    borderRadius: 8,
+    gap: 12,
+  },
+  fileItemText: {
+    flex: 1,
+    fontSize: 14,
+  },
+  removeFileButton: {
+    padding: 2,
+  },
+  detailsFilesContainer: {
+    gap: 8,
+  },
+  detailsFileItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderWidth: 1,
+    borderRadius: 12,
+    gap: 12,
+  },
+  detailsFileItemText: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '500',
   },
 });

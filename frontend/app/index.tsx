@@ -10,6 +10,8 @@ import {
   Dimensions,
   FlatList,
   Image,
+  Alert,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -35,6 +37,7 @@ interface DashboardItem {
   lastUsedAt?: number;
   usageCount?: number;
   isFavorite?: boolean;
+  favoritedAt?: number;
 }
 
 interface CategoryStats {
@@ -164,6 +167,7 @@ export default function HomeScreen() {
           lastUsedAt: item.lastUsedAt,
           usageCount: item.usageCount || 0,
           isFavorite: item.isFavorite || false,
+          favoritedAt: item.favoritedAt || 0,
         }));
 
         allItems = [...allItems, ...categoryItems];
@@ -197,36 +201,29 @@ export default function HomeScreen() {
           });
         }
 
-        // Pull generated images from Prompts and AI Stack for dashboard gallery.
+        // Pull ONLY generated images from Prompts
         if (section.storageKey === 'prompts') {
           for (const item of items) {
-            const imageUri = item.generatedImage || item.inputImage;
-            if (imageUri) {
-              generatedImagesList.push({
-                id: item.id,
-                uri: imageUri,
-                timestamp: item.createdAt || 0,
-              });
-            }
-          }
-        }
-
-        if (section.storageKey === 'ai_stack') {
-          for (const item of items) {
-            const images: string[] = item.images || [];
-            for (let index = 0; index < images.length; index++) {
-              try {
-                const parsed = JSON.parse(images[index]);
-                if (parsed?.uri) {
-                  generatedImagesList.push({
-                    id: `${item.id}-${index}`,
-                    uri: parsed.uri,
-                    timestamp: item.createdAt || 0,
-                  });
-                }
-              } catch {
-                // Ignore malformed image entries to keep dashboard robust.
-              }
+            const singleImageUri = item.generatedImage;
+            if (singleImageUri) {
+               if (typeof singleImageUri === 'string' && singleImageUri.startsWith('{')) {
+                 try {
+                   const parsed = JSON.parse(singleImageUri);
+                   if (parsed?.uri) {
+                     generatedImagesList.push({
+                       id: `${item.id}-single`,
+                       uri: parsed.uri,
+                       timestamp: item.createdAt || 0,
+                     });
+                   }
+                 } catch {}
+               } else {
+                 generatedImagesList.push({
+                   id: `${item.id}-single`,
+                   uri: singleImageUri,
+                   timestamp: item.createdAt || 0,
+                 });
+               }
             }
           }
         }
@@ -237,7 +234,14 @@ export default function HomeScreen() {
 
     // Sort and organize data
     const sortedItems = allItems.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
-    const favoriteItems = sortedItems.filter(item => item.isFavorite).slice(0, 5);
+    const favoriteItems = allItems
+      .filter(item => item.isFavorite)
+      .sort((a, b) => {
+        const timeA = a.favoritedAt || a.updatedAt || a.createdAt || 0;
+        const timeB = b.favoritedAt || b.updatedAt || b.createdAt || 0;
+        return timeB - timeA;
+      })
+      .slice(0, 5);
     const recentItemsList = sortedItems.slice(0, 3);
     const sortedActivities = activityList.sort((a, b) => b.timestamp - a.timestamp).slice(0, 5);
     const topCatsArray = Object.values(categoryMap)
@@ -263,6 +267,21 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       loadAllData();
+    }, [])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        Alert.alert('Exit App', 'Are you sure you want to exit?', [
+          { text: 'Cancel', style: 'cancel', onPress: () => null },
+          { text: 'Exit', style: 'destructive', onPress: () => BackHandler.exitApp() },
+        ]);
+        return true;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
     }, [])
   );
 
@@ -313,7 +332,7 @@ export default function HomeScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Date & Time */}
-        <View style={[styles.dateCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.dateCard, { backgroundColor: colors.surface }]}>
           <Ionicons name="calendar" size={16} color={colors.primary} />
           <Text style={[styles.dateText, { color: colors.text }]}>{date}</Text>
           <Text style={[styles.timeSeparator, { color: colors.textSecondary }]}>•</Text>
@@ -324,22 +343,22 @@ export default function HomeScreen() {
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Your Productivity</Text>
           <View style={styles.statsRow}>
-            <View style={[styles.statMini, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.statMini, { backgroundColor: colors.card }]}>
               <Ionicons name="layers" size={18} color="#6366F1" />
               <Text style={[styles.statMiniNumber, { color: colors.text }]}>{totalCount}</Text>
               <Text style={[styles.statMiniLabel, { color: colors.textSecondary }]}>Total Items</Text>
             </View>
-            <View style={[styles.statMini, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.statMini, { backgroundColor: colors.card }]}>
               <Ionicons name="trending-up" size={18} color="#10B981" />
               <Text style={[styles.statMiniNumber, { color: colors.text }]}>{weekCount}</Text>
               <Text style={[styles.statMiniLabel, { color: colors.textSecondary }]}>This Week</Text>
             </View>
-            <View style={[styles.statMini, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.statMini, { backgroundColor: colors.card }]}>
               <Ionicons name="folder" size={18} color="#F59E0B" />
               <Text style={[styles.statMiniNumber, { color: colors.text }]}>{categoryStats.length}</Text>
               <Text style={[styles.statMiniLabel, { color: colors.textSecondary }]}>Categories</Text>
             </View>
-            <View style={[styles.statMini, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.statMini, { backgroundColor: colors.card }]}>
               <Ionicons name="star" size={18} color="#EC4899" />
               <Text style={[styles.statMiniNumber, { color: colors.text }]}>{favorites.length}</Text>
               <Text style={[styles.statMiniLabel, { color: colors.textSecondary }]}>Favorites</Text>
@@ -352,7 +371,7 @@ export default function HomeScreen() {
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Focus Today</Text>
             {recentItems.map((item) => (
-              <View key={item.id} style={[styles.focusItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View key={item.id} style={[styles.focusItem, { backgroundColor: colors.card }]}>
                 <View style={[styles.focusIcon, { backgroundColor: colors.surface }]}>
                   <Ionicons name="star-outline" size={16} color={colors.primary} />
                 </View>
@@ -370,7 +389,7 @@ export default function HomeScreen() {
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Favorites</Text>
           {favorites.length > 0 ? (
-            <View style={[styles.favoritesContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.favoritesContainer, { backgroundColor: colors.card }]}>
               {favorites.map((item, idx) => (
                 <View key={item.id}>
                   <View style={styles.favoriteItem}>
@@ -403,7 +422,7 @@ export default function HomeScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.quickAccessScroll}
               renderItem={({ item }) => (
-                <View style={[styles.quickAccessCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View style={[styles.quickAccessCard, { backgroundColor: colors.card }]}>
                   <Text style={[styles.qaTitle, { color: colors.text }]} numberOfLines={2}>{item.title}</Text>
                   <Text style={[styles.qaCategory, { color: colors.textSecondary }]}>{item.category}</Text>
                   <Text style={[styles.qaTime, { color: colors.textSecondary }]}>{formatRelativeTime(item.updatedAt || item.createdAt)}</Text>
@@ -428,7 +447,7 @@ export default function HomeScreen() {
               ))}
             </View>
           ) : (
-            <View style={[styles.recentImagesEmpty, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={[styles.recentImagesEmpty, { backgroundColor: colors.surface }]}>
               <Text style={[styles.recentImagesEmptyText, { color: colors.textSecondary }]}>No generated images yet</Text>
             </View>
           )}
@@ -441,7 +460,7 @@ export default function HomeScreen() {
             {topCategories.map((cat) => {
               const section = sections.find(s => s.title === cat.name);
               return (
-                <View key={cat.name} style={[styles.topCatItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View key={cat.name} style={[styles.topCatItem, { backgroundColor: colors.card }]}>
                   <View style={[styles.topCatIcon, { backgroundColor: cat.color + '20' }]}>
                     <Ionicons name={cat.icon} size={18} color={cat.color} />
                   </View>
@@ -471,7 +490,7 @@ export default function HomeScreen() {
                   key={section.id}
                   style={[
                     styles.gridCard,
-                    { backgroundColor: colors.card, borderColor: colors.border },
+                    { backgroundColor: colors.card },
                   ]}
                   onPress={() => navigateToSection(section.route)}
                   activeOpacity={0.7}
@@ -498,7 +517,7 @@ export default function HomeScreen() {
         {activities.length > 0 && (
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent Activity</Text>
-            <View style={[styles.activityContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.activityContainer, { backgroundColor: colors.card }]}>
               {activities.map((activity, idx) => (
                 <View key={activity.id}>
                   <View style={styles.activityRow}>
@@ -522,7 +541,7 @@ export default function HomeScreen() {
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Insights</Text>
             <View style={styles.insightsContainer}>
-              <View style={[styles.insightCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={[styles.insightCard, { backgroundColor: colors.card }]}>
                 <Ionicons name="bulb" size={18} color="#F59E0B" />
                 <View style={{ marginLeft: 10, flex: 1 }}>
                   <Text style={[styles.insightText, { color: colors.text }]}>
@@ -530,7 +549,7 @@ export default function HomeScreen() {
                   </Text>
                 </View>
               </View>
-              <View style={[styles.insightCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={[styles.insightCard, { backgroundColor: colors.card }]}>
                 <Ionicons name="flame" size={18} color="#EF4444" />
                 <View style={{ marginLeft: 10, flex: 1 }}>
                   <Text style={[styles.insightText, { color: colors.text }]}>
@@ -563,33 +582,35 @@ export default function HomeScreen() {
       >
         <Pressable style={styles.menuOverlay} onPress={() => setIsMenuVisible(false)}>
           <Pressable
-            style={[styles.menuContainer, { backgroundColor: colors.card, borderColor: colors.border }]}
+            style={[styles.menuContainer, { backgroundColor: colors.card }]}
             onPress={() => {}}
           >
             <Text style={[styles.menuTitle, { color: colors.text }]}>All Sections</Text>
-            {menuSections.map((section) => {
-              const count = categoryStats.find(c => c.name === section.title)?.count || 0;
-              return (
-                <TouchableOpacity
-                  key={section.id}
-                  style={[styles.menuItem, { borderBottomColor: colors.border }]}
-                  onPress={() => navigateToSection(section.route)}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.menuItemLeft}>
-                    <View style={[styles.menuIcon, { backgroundColor: section.color + '20' }]}>
-                      <Ionicons name={section.icon} size={16} color={section.color} />
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 10 }}>
+              {menuSections.map((section) => {
+                const count = categoryStats.find(c => c.name === section.title)?.count || 0;
+                return (
+                  <TouchableOpacity
+                    key={section.id}
+                    style={[styles.menuItem, { borderBottomColor: colors.border }]}
+                    onPress={() => navigateToSection(section.route)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.menuItemLeft}>
+                      <View style={[styles.menuIcon, { backgroundColor: section.color + '20' }]}>
+                        <Ionicons name={section.icon} size={16} color={section.color} />
+                      </View>
+                      <Text style={[styles.menuItemText, { color: colors.text }]}>{section.title}</Text>
                     </View>
-                    <Text style={[styles.menuItemText, { color: colors.text }]}>{section.title}</Text>
-                  </View>
-                  {section.showCount ? (
-                    <Text style={[styles.menuCount, { color: colors.textSecondary }]}>{count}</Text>
-                  ) : (
-                    <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-                  )}
-                </TouchableOpacity>
-              );
-            })}
+                    {section.showCount ? (
+                      <Text style={[styles.menuCount, { color: colors.textSecondary }]}>{count}</Text>
+                    ) : (
+                      <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
@@ -610,342 +631,432 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 80,
+    paddingBottom: 100,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 16,
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 24,
   },
   greeting: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: -0.5,
   },
   lastActivity: {
-    fontSize: 12,
-    marginTop: 4,
+    fontSize: 13,
+    marginTop: 6,
+    fontWeight: '500',
+    opacity: 0.8,
   },
   headerActions: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 12,
   },
   headerButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 3,
   },
   dateCard: {
-    marginHorizontal: 20,
-    marginBottom: 20,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderWidth: 1,
+    marginHorizontal: 24,
+    marginBottom: 28,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 3,
+    borderWidth: 0,
   },
   dateText: {
-    fontSize: 12,
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '600',
   },
   timeSeparator: {
-    fontSize: 10,
+    fontSize: 12,
+    opacity: 0.5,
   },
   timeText: {
-    fontSize: 12,
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '700',
   },
   section: {
-    marginBottom: 24,
-    paddingHorizontal: 20,
+    marginBottom: 32,
+    paddingHorizontal: 24,
   },
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 12,
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 16,
+    letterSpacing: -0.5,
   },
   statsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    gap: 10,
+    gap: 12,
   },
   statMini: {
-    width: (screenWidth - 60) / 2,
-    paddingVertical: 12,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: 'center',
+    width: '48%', // Allow wrap easily
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    alignItems: 'flex-start',
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.06,
+    shadowRadius: 14,
+    elevation: 4,
+    borderWidth: 0,
   },
   statMiniNumber: {
-    fontSize: 18,
-    fontWeight: '700',
-    marginTop: 4,
-    marginBottom: 2,
+    fontSize: 24,
+    fontWeight: '800',
+    marginTop: 12,
+    marginBottom: 4,
   },
   statMiniLabel: {
-    fontSize: 10,
-    fontWeight: '500',
+    fontSize: 12,
+    fontWeight: '600',
+    opacity: 0.8,
   },
   focusItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    marginBottom: 8,
-    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderRadius: 20,
+    marginBottom: 12,
+    gap: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 3,
+    borderWidth: 0,
   },
   focusIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
+    width: 44,
+    height: 44,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   focusTitle: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
   },
   focusCategory: {
-    fontSize: 11,
-    marginTop: 2,
+    fontSize: 12,
+    marginTop: 4,
+    fontWeight: '500',
+    opacity: 0.7,
   },
   focusTime: {
-    fontSize: 10,
+    fontSize: 11,
+    fontWeight: '600',
   },
   favoritesContainer: {
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: 20,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 4,
+    borderWidth: 0,
   },
   favoriteItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 12,
   },
   favTitle: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
   },
   favSubtitle: {
-    fontSize: 11,
-    marginTop: 2,
+    fontSize: 12,
+    marginTop: 4,
+    fontWeight: '500',
+    opacity: 0.7,
   },
   divider: {
     height: 1,
+    opacity: 0.4,
+    marginHorizontal: 16,
   },
   emptyState: {
-    paddingVertical: 20,
-    paddingHorizontal: 16,
-    borderRadius: 10,
+    paddingVertical: 32,
+    paddingHorizontal: 20,
+    borderRadius: 20,
     alignItems: 'center',
   },
   emptyText: {
-    fontSize: 12,
-    marginTop: 8,
-    fontWeight: '500',
+    fontSize: 14,
+    marginTop: 12,
+    fontWeight: '600',
   },
   quickAccessScroll: {
-    gap: 10,
-    paddingRight: 20,
+    gap: 14,
+    paddingRight: 24,
   },
   quickAccessCard: {
-    width: 140,
-    paddingHorizontal: 10,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1,
+    width: 150,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 3,
+    borderWidth: 0,
   },
   qaTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 4,
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 6,
   },
   qaCategory: {
-    fontSize: 10,
-    marginBottom: 4,
+    fontSize: 11,
+    fontWeight: '600',
+    opacity: 0.8,
+    marginBottom: 6,
   },
   qaTime: {
-    fontSize: 9,
+    fontSize: 10,
+    fontWeight: '500',
+    opacity: 0.5,
   },
   recentImagesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 10,
   },
   recentImage: {
-    width: RECENT_IMAGE_SIZE,
-    height: RECENT_IMAGE_SIZE,
-    borderRadius: 8,
+    width: Math.floor((screenWidth - 48 - 30) / 4), // adjusted for new padding 24
+    height: Math.floor((screenWidth - 48 - 30) / 4),
+    borderRadius: 14,
   },
   recentImagesEmpty: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 14,
+    borderRadius: 20,
+    paddingVertical: 24,
     alignItems: 'center',
   },
   recentImagesEmptyText: {
-    fontSize: 12,
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '600',
   },
   topCatItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    marginBottom: 8,
-    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 20,
+    marginBottom: 12,
+    gap: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 3,
+    borderWidth: 0,
   },
   topCatIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 9,
+    width: 44,
+    height: 44,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   topCatName: {
-    fontSize: 13,
-    fontWeight: '600',
-    marginBottom: 2,
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 4,
   },
   topCatMeta: {
-    fontSize: 11,
+    fontSize: 12,
+    fontWeight: '500',
+    opacity: 0.7,
   },
   gridContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    gap: 10,
+    gap: 12,
   },
   gridCard: {
-    width: (screenWidth - 60) / 2,
-    paddingHorizontal: 12,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
+    width: '48%',
+    paddingHorizontal: 16,
+    paddingVertical: 20,
+    borderRadius: 20,
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    elevation: 4,
+    borderWidth: 0,
   },
   gridIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
+    width: 52,
+    height: 52,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
   },
   gridTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    marginBottom: 4,
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 6,
     textAlign: 'center',
   },
   gridCount: {
-    fontSize: 11,
-    marginBottom: 2,
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 4,
+    opacity: 0.8,
   },
   gridTime: {
     fontSize: 10,
+    fontWeight: '500',
+    opacity: 0.5,
   },
   activityContainer: {
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: 20,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 4,
+    borderWidth: 0,
   },
   activityRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 14,
   },
   activityIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 7,
+    width: 36,
+    height: 36,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   activityText: {
-    fontSize: 12,
-    fontWeight: '500',
-    marginBottom: 2,
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
   },
   activityCategory: {
-    fontSize: 10,
+    fontSize: 11,
+    fontWeight: '500',
+    opacity: 0.6,
   },
   insightsContainer: {
-    gap: 10,
+    gap: 12,
   },
   insightCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 3,
+    borderWidth: 0,
   },
   insightText: {
-    fontSize: 12,
-    fontWeight: '500',
+    fontSize: 14,
+    fontWeight: '600',
   },
   emptyFullState: {
-    paddingVertical: 40,
-    paddingHorizontal: 20,
+    paddingVertical: 60,
+    paddingHorizontal: 24,
     alignItems: 'center',
-    marginHorizontal: 20,
-    borderRadius: 14,
+    marginHorizontal: 24,
+    borderRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.04,
+    shadowRadius: 14,
+    elevation: 2,
+    borderWidth: 0,
   },
   emptyTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginTop: 12,
-    marginBottom: 4,
+    fontSize: 18,
+    fontWeight: '700',
+    marginTop: 16,
+    marginBottom: 8,
   },
   emptySubtitle: {
-    fontSize: 12,
+    fontSize: 13,
     textAlign: 'center',
+    fontWeight: '500',
+    opacity: 0.7,
+    lineHeight: 20,
   },
   menuOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-start',
     alignItems: 'flex-end',
     paddingTop: 90,
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
+    zIndex: 99,
   },
   menuContainer: {
-    borderRadius: 14,
-    borderWidth: 1,
-    paddingVertical: 6,
+    borderRadius: 20,
+    paddingVertical: 8,
     maxHeight: '75%',
-    minWidth: 200,
+    minWidth: 220,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+    elevation: 10,
+    borderWidth: 0,
+    zIndex: 100,
   },
   menuTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    fontSize: 18,
+    fontWeight: '800',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   menuItemLeft: {
@@ -954,35 +1065,36 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   menuIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
+    marginRight: 12,
   },
   menuItemText: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '600',
   },
   menuCount: {
     fontSize: 13,
     marginLeft: 10,
+    fontWeight: '700',
+    opacity: 0.5,
   },
   fab: {
     position: 'absolute',
     bottom: 24,
-    right: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    right: 24,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
+    shadowColor: '#6366F1',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 8,
   },
 });
-
