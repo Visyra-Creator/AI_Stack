@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -16,25 +16,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/src/context/ThemeContext';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-interface Note {
-  id: string;
-  content: string;
-  sectionId: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
-interface Section {
-  id: string;
-  name: string;
-  createdAt: number;
-}
+import { notesStorage, noteSectionsStorage, NoteItem as Note, NoteSection as Section } from '@/src/services/storage';
 
 export default function NotesScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const cloudSyncEnabled =
+    process.env.EXPO_PUBLIC_USE_POCKETBASE === 'true' &&
+    !!process.env.EXPO_PUBLIC_POCKETBASE_URL;
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -44,58 +34,49 @@ export default function NotesScreen() {
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteContent, setNoteContent] = useState('');
   const [editorModalVisible, setEditorModalVisible] = useState(false);
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
+  const [syncToast, setSyncToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const syncToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showSyncToast = useCallback((text: string, type: 'success' | 'error') => {
+    if (syncToastTimerRef.current) {
+      clearTimeout(syncToastTimerRef.current);
+    }
+    setSyncToast({ text, type });
+    syncToastTimerRef.current = setTimeout(() => {
+      setSyncToast(null);
+      syncToastTimerRef.current = null;
+    }, 2000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (syncToastTimerRef.current) {
+        clearTimeout(syncToastTimerRef.current);
+      }
+    };
+  }, []);
 
   const loadNotes = useCallback(async () => {
     try {
-      const data = await AsyncStorage.getItem('notes');
-      if (!data) {
-        setNotes([]);
-        return;
-      }
-      const notesArray = JSON.parse(data);
-      if (!Array.isArray(notesArray)) {
-        console.error('Notes data is not an array, clearing...');
-        await AsyncStorage.removeItem('notes');
-        setNotes([]);
-        return;
-      }
-      const sorted = notesArray.sort((a: Note, b: Note) => b.updatedAt - a.updatedAt);
+      const notesArray = await notesStorage.getAll();
+      const sorted = [...notesArray].sort((a: Note, b: Note) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
       setNotes(sorted);
+      if (cloudSyncEnabled) {
+        setLastSyncedAt(Date.now());
+      }
     } catch (error) {
       console.error('Error loading notes:', error);
-      // Clear corrupted data
-      try {
-        await AsyncStorage.removeItem('notes');
-      } catch (e) {
-        console.error('Error clearing notes:', e);
-      }
       setNotes([]);
     }
-  }, []);
+  }, [cloudSyncEnabled]);
 
   const loadSections = useCallback(async () => {
     try {
-      const data = await AsyncStorage.getItem('noteSections');
-      if (!data) {
-        setSections([]);
-        return;
-      }
-      const sectionsArray = JSON.parse(data);
-      if (!Array.isArray(sectionsArray)) {
-        console.error('Sections data is not an array, clearing...');
-        await AsyncStorage.removeItem('noteSections');
-        setSections([]);
-        return;
-      }
+      const sectionsArray = await noteSectionsStorage.getAll();
       setSections(sectionsArray);
     } catch (error) {
       console.error('Error loading sections:', error);
-      // Clear corrupted data
-      try {
-        await AsyncStorage.removeItem('noteSections');
-      } catch (e) {
-        console.error('Error clearing sections:', e);
-      }
       setSections([]);
     }
   }, []);
@@ -113,6 +94,21 @@ export default function NotesScreen() {
     setRefreshing(false);
   }, [loadNotes]);
 
+  const handleManualSync = useCallback(async () => {
+    if (!cloudSyncEnabled || isManualSyncing) return;
+    setIsManualSyncing(true);
+    try {
+      await Promise.all([loadSections(), loadNotes()]);
+      setLastSyncedAt(Date.now());
+      showSyncToast('Synced successfully', 'success');
+    } catch (error) {
+      console.error('Manual sync failed:', error);
+      showSyncToast('Sync failed', 'error');
+    } finally {
+      setIsManualSyncing(false);
+    }
+  }, [cloudSyncEnabled, isManualSyncing, loadSections, loadNotes, showSyncToast]);
+
   const saveNote = useCallback(async () => {
     if (!noteContent.trim()) {
       Alert.alert('Empty Note', 'Please enter some content for the note.');
@@ -125,53 +121,31 @@ export default function NotesScreen() {
     }
 
     try {
-      const data = await AsyncStorage.getItem('notes');
-      let notesArray: Note[] = [];
-
-      if (data) {
-        try {
-          const parsed = JSON.parse(data);
-          if (Array.isArray(parsed)) {
-            notesArray = parsed;
-          } else {
-            console.warn('Stored notes data is not an array, starting fresh');
-            notesArray = [];
-          }
-        } catch {
-          console.warn('Failed to parse stored notes, starting fresh');
-          notesArray = [];
-        }
-      }
-
       if (editingNoteId) {
-        // Update existing note
-        notesArray = notesArray.map((note: Note) =>
-          note.id === editingNoteId
-            ? { ...note, content: noteContent.trim(), updatedAt: Date.now() }
-            : note
-        );
-      } else {
-        // Create new note
-        const newNote: Note = {
-          id: Date.now().toString(),
+        await notesStorage.update(editingNoteId, {
           content: noteContent.trim(),
           sectionId: selectedSectionId,
-          createdAt: Date.now(),
+        });
+      } else {
+        await notesStorage.add({
+          content: noteContent.trim(),
+          sectionId: selectedSectionId,
           updatedAt: Date.now(),
-        };
-        notesArray.push(newNote);
+        });
       }
 
-      await AsyncStorage.setItem('notes', JSON.stringify(notesArray));
       setNoteContent('');
       setEditingNoteId(null);
       setEditorModalVisible(false);
       await loadNotes();
+      if (cloudSyncEnabled) {
+        setLastSyncedAt(Date.now());
+      }
     } catch (error) {
       console.error('Error saving note:', error);
       Alert.alert('Error', 'Failed to save note.');
     }
-  }, [noteContent, selectedSectionId, editingNoteId, loadNotes]);
+  }, [noteContent, selectedSectionId, editingNoteId, loadNotes, cloudSyncEnabled]);
 
   const deleteNote = useCallback(
     async (noteId: string) => {
@@ -182,23 +156,11 @@ export default function NotesScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const data = await AsyncStorage.getItem('notes');
-              let notesArray: Note[] = [];
-
-              if (data) {
-                try {
-                  const parsed = JSON.parse(data);
-                  if (Array.isArray(parsed)) {
-                    notesArray = parsed;
-                  }
-                } catch {
-                  console.warn('Failed to parse notes');
-                }
-              }
-
-              const filtered = notesArray.filter((note: Note) => note.id !== noteId);
-              await AsyncStorage.setItem('notes', JSON.stringify(filtered));
+              await notesStorage.delete(noteId);
               await loadNotes();
+              if (cloudSyncEnabled) {
+                setLastSyncedAt(Date.now());
+              }
             } catch (error) {
               console.error('Error deleting note:', error);
               Alert.alert('Error', 'Failed to delete note.');
@@ -207,7 +169,7 @@ export default function NotesScreen() {
         },
       ]);
     },
-    [loadNotes]
+    [loadNotes, cloudSyncEnabled]
   );
 
   const createSection = useCallback(async () => {
@@ -217,42 +179,23 @@ export default function NotesScreen() {
     }
 
     try {
-      const data = await AsyncStorage.getItem('noteSections');
-      let sectionsArray: Section[] = [];
-
-      if (data) {
-        try {
-          const parsed = JSON.parse(data);
-          if (Array.isArray(parsed)) {
-            sectionsArray = parsed;
-          } else {
-            console.warn('Stored sections data is not an array');
-            sectionsArray = [];
-          }
-        } catch {
-          console.warn('Failed to parse stored sections');
-          sectionsArray = [];
-        }
-      }
-
-      const newSection: Section = {
-        id: Date.now().toString(),
+      const newSection = await noteSectionsStorage.add({
         name: newSectionName.trim(),
-        createdAt: Date.now(),
-      };
-
-      sectionsArray.push(newSection);
-      await AsyncStorage.setItem('noteSections', JSON.stringify(sectionsArray));
+        updatedAt: Date.now(),
+      });
 
       setNewSectionName('');
       setShowSectionModal(false);
       setSelectedSectionId(newSection.id);
       await loadSections();
+      if (cloudSyncEnabled) {
+        setLastSyncedAt(Date.now());
+      }
     } catch (error) {
       console.error('Error creating section:', error);
       Alert.alert('Error', 'Failed to create section.');
     }
-  }, [newSectionName, loadSections]);
+  }, [newSectionName, loadSections, cloudSyncEnabled]);
 
   const deleteSection = useCallback(
     async (sectionId: string) => {
@@ -263,41 +206,13 @@ export default function NotesScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              // Delete section
-              const sectionsData = await AsyncStorage.getItem('noteSections');
-              let sectionsArray: Section[] = [];
-
-              if (sectionsData) {
-                try {
-                  const parsed = JSON.parse(sectionsData);
-                  if (Array.isArray(parsed)) {
-                    sectionsArray = parsed;
-                  }
-                } catch {
-                  console.warn('Failed to parse sections');
-                }
-              }
-
+              const sectionsArray = await noteSectionsStorage.getAll();
               const filteredSections = sectionsArray.filter((sec: Section) => sec.id !== sectionId);
-              await AsyncStorage.setItem('noteSections', JSON.stringify(filteredSections));
+              await noteSectionsStorage.saveAll(filteredSections);
 
-              // Delete notes in this section
-              const notesData = await AsyncStorage.getItem('notes');
-              let notesArray: Note[] = [];
-
-              if (notesData) {
-                try {
-                  const parsed = JSON.parse(notesData);
-                  if (Array.isArray(parsed)) {
-                    notesArray = parsed;
-                  }
-                } catch {
-                  console.warn('Failed to parse notes');
-                }
-              }
-
+              const notesArray = await notesStorage.getAll();
               const filteredNotes = notesArray.filter((note: Note) => note.sectionId !== sectionId);
-              await AsyncStorage.setItem('notes', JSON.stringify(filteredNotes));
+              await notesStorage.saveAll(filteredNotes);
 
               if (selectedSectionId === sectionId && filteredSections.length > 0) {
                 setSelectedSectionId(filteredSections[0].id);
@@ -307,6 +222,9 @@ export default function NotesScreen() {
 
               await loadSections();
               await loadNotes();
+              if (cloudSyncEnabled) {
+                setLastSyncedAt(Date.now());
+              }
             } catch (error) {
               console.error('Error deleting section:', error);
               Alert.alert('Error', 'Failed to delete section.');
@@ -315,8 +233,19 @@ export default function NotesScreen() {
         },
       ]);
     },
-    [selectedSectionId, loadSections, loadNotes]
+    [selectedSectionId, loadSections, loadNotes, cloudSyncEnabled]
   );
+
+  const formatRelativeSync = (timestamp: number) => {
+    const diffMs = Date.now() - timestamp;
+    const seconds = Math.floor(diffMs / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    if (seconds < 60) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+  };
 
   const formatDateTime = (timestamp: number) => {
     const date = new Date(timestamp);
@@ -361,11 +290,47 @@ export default function NotesScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.headerBackButton}>
           <Ionicons name="chevron-back" size={28} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Notes</Text>
-        <View style={{ width: 28 }} />
+        <View style={styles.headerCenter}>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Notes</Text>
+          <Text style={[styles.syncStatusText, { color: colors.textSecondary }]}>
+            {cloudSyncEnabled ? 'Offline + Cloud sync' : 'Offline only'}
+          </Text>
+          {cloudSyncEnabled && (
+            <Text style={[styles.syncMetaText, { color: colors.textSecondary }]}>
+              {lastSyncedAt ? `Last sync: ${formatRelativeSync(lastSyncedAt)}` : 'Last sync: pending'}
+            </Text>
+          )}
+        </View>
+        <View style={styles.headerActions}>
+          {cloudSyncEnabled && (
+            <TouchableOpacity
+              onPress={handleManualSync}
+              disabled={isManualSyncing}
+              style={[
+                styles.syncButton,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <Ionicons
+                name={isManualSyncing ? 'sync' : 'sync-outline'}
+                size={18}
+                color={colors.textSecondary}
+              />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            onPress={() => router.push('/')}
+            style={[
+              styles.syncButton,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
+            <Ionicons name="home-outline" size={18} color={colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Sections Tabs */}
@@ -647,6 +612,17 @@ export default function NotesScreen() {
       </Modal>
 
       {/* Floating Action Button */}
+      {syncToast && (
+        <View
+          style={[
+            styles.syncToast,
+            { backgroundColor: syncToast.type === 'success' ? '#16A34A' : colors.danger },
+          ]}
+        >
+          <Text style={styles.syncToastText}>{syncToast.text}</Text>
+        </View>
+      )}
+
       <TouchableOpacity
         onPress={createNewNote}
         style={[styles.fab, { backgroundColor: colors.primary }]}
@@ -672,6 +648,58 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '800',
     letterSpacing: -0.5,
+  },
+  headerBackButton: {
+    width: 80,
+    alignItems: 'flex-start',
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 10,
+  },
+  syncStatusText: {
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 2,
+    opacity: 0.85,
+  },
+  syncMetaText: {
+    fontSize: 10,
+    fontWeight: '500',
+    marginTop: 2,
+    opacity: 0.7,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minWidth: 80,
+    justifyContent: 'flex-end',
+  },
+  syncButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  syncToast: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    bottom: 120,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  syncToastText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
   },
   // Sections Tabs
   sectionsTabsContainer: {

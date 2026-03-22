@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect } from 'react';
 
 /**
  * Hook to validate component props and log warnings for type mismatches
@@ -107,4 +107,3 @@ export const createPropValidator = (expectedTypes: Record<string, string>) => {
     return true;
   };
 };
-

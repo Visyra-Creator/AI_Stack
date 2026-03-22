@@ -41,7 +41,7 @@ type ViewMode = 'normal' | 'gallery';
 export default function PromptsScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth } = useWindowDimensions();
   const galleryColumns = 4;
   const gap = 1;
   const galleryCardWidth = (windowWidth - (galleryColumns - 1) * gap) / galleryColumns;
@@ -70,6 +70,8 @@ export default function PromptsScreen() {
     prompt: '',
     inputImage: undefined as string | undefined,
     generatedImage: undefined as string | undefined,
+    inputImages: [] as string[],
+    generatedImages: [] as string[],
     aiToolUsed: '',
     category: 'image',
     type: 'general' as 'general' | 'personal',
@@ -216,6 +218,8 @@ export default function PromptsScreen() {
       prompt: '',
       inputImage: undefined,
       generatedImage: undefined,
+      inputImages: [],
+      generatedImages: [],
       aiToolUsed: '',
       category: getDefaultCategory(),
       type: activeTab,
@@ -236,6 +240,8 @@ export default function PromptsScreen() {
       prompt: item.prompt,
       inputImage: item.inputImage,
       generatedImage: item.generatedImage,
+      inputImages: item.inputImages || (item.inputImage ? [item.inputImage] : []),
+      generatedImages: item.generatedImages || (item.generatedImage ? [item.generatedImage] : []),
       aiToolUsed: item.aiToolUsed,
       category: item.category,
       type: item.type,
@@ -254,10 +260,16 @@ export default function PromptsScreen() {
       return;
     }
 
+    const payload = {
+      ...formData,
+      inputImage: formData.inputImages[0],
+      generatedImage: formData.generatedImages[0],
+    };
+
     if (editingItem) {
-      await promptsStorage.update(editingItem.id, formData);
+      await promptsStorage.update(editingItem.id, payload);
     } else {
-      await promptsStorage.add(formData);
+      await promptsStorage.add(payload);
     }
 
     await loadItems();
@@ -424,7 +436,14 @@ export default function PromptsScreen() {
     );
   };
 
-  const getPrimaryPromptImage = (item: PromptItem) => item.generatedImage || item.inputImage;
+  const getPrimaryPromptImage = (item: PromptItem) => {
+    return (
+      item.generatedImages?.[0] ||
+      item.inputImages?.[0] ||
+      item.generatedImage ||
+      item.inputImage
+    );
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -608,6 +627,17 @@ export default function PromptsScreen() {
                 ) : (
                   <View style={[styles.galleryPlaceholder, { backgroundColor: colors.surface }]}>
                     <Ionicons name="image-outline" size={24} color={colors.textSecondary} />
+                    <Text style={[styles.galleryPlaceholderText, { color: colors.textSecondary }]}>No image</Text>
+                    <TouchableOpacity
+                      style={[styles.galleryAddImageCta, { backgroundColor: colors.background + 'D9' }]}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        openEditModal(item);
+                      }}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={[styles.galleryAddImageCtaText, { color: colors.text }]}>Add image</Text>
+                    </TouchableOpacity>
                   </View>
                 )}
                 <View style={styles.galleryOverlay}>
@@ -763,16 +793,32 @@ export default function PromptsScreen() {
             {categoryConfig.showInputImage && (
               <ImagePicker
                 label="Input/Reference Image"
-                value={formData.inputImage}
-                onChange={(img) => setFormData({ ...formData, inputImage: img })}
+                multiple
+                values={formData.inputImages}
+                onChange={() => undefined}
+                onChangeValues={(imgs) =>
+                  setFormData({
+                    ...formData,
+                    inputImages: imgs,
+                    inputImage: imgs[0],
+                  })
+                }
               />
             )}
 
             {categoryConfig.showGeneratedImage && (
               <ImagePicker
                 label="Generated Image"
-                value={formData.generatedImage}
-                onChange={(img) => setFormData({ ...formData, generatedImage: img })}
+                multiple
+                values={formData.generatedImages}
+                onChange={() => undefined}
+                onChangeValues={(imgs) =>
+                  setFormData({
+                    ...formData,
+                    generatedImages: imgs,
+                    generatedImage: imgs[0],
+                  })
+                }
               />
             )}
             <View style={styles.bottomPadding} />
@@ -1013,6 +1059,22 @@ const styles = StyleSheet.create({
     height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  galleryPlaceholderText: {
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 6,
+    opacity: 0.85,
+  },
+  galleryAddImageCta: {
+    marginTop: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  galleryAddImageCtaText: {
+    fontSize: 10,
+    fontWeight: '700',
   },
   galleryOverlay: {
     position: 'absolute',

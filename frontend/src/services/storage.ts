@@ -1,4 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  clearPocketBaseAppData,
+  getPocketBaseCategories,
+  getPocketBaseItems,
+  hasPocketBaseMapping,
+  savePocketBaseCategories,
+  savePocketBaseItems,
+  shouldUsePocketBase,
+} from './pocketbaseAdapter';
 
 const STORAGE_KEYS = {
   AI_STACK: 'ai_stack',
@@ -19,6 +28,8 @@ const STORAGE_KEYS = {
   REFERENCE: 'reference',
   MARKETING: 'marketing',
   MARKETING_CATEGORIES: 'marketing_categories',
+  NOTES: 'notes',
+  NOTE_SECTIONS: 'noteSections',
 };
 
 const DEFAULT_AI_STACK_CATEGORIES = [
@@ -99,6 +110,8 @@ export interface PromptItem {
   prompt: string;
   inputImage?: string;
   generatedImage?: string;
+  inputImages?: string[];
+  generatedImages?: string[];
   aiToolUsed: string;
   category: string;
   type: 'general' | 'personal';
@@ -115,6 +128,7 @@ export interface ToolItem {
   description: string;
   instructions: string;
   image?: string;
+  images?: string[];
   isFavorite?: boolean;
   createdAt: number;
   updatedAt?: number;
@@ -232,20 +246,108 @@ export interface MarketingItem {
   isFavorite?: boolean;
   image?: string;
   file?: string;
+  images?: string[];
+  files?: string[];
   createdAt: number;
   updatedAt?: number;
   favoritedAt?: number;
+}
+
+export interface NoteItem {
+  id: string;
+  content: string;
+  sectionId: string;
+  createdAt: number;
+  updatedAt?: number;
+}
+
+export interface NoteSection {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt?: number;
 }
 
 const generateId = (): string => {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
 };
 
+const isCategoryKey = (key: string) => key.endsWith('_categories') || key.endsWith('_CATEGORIES');
+
+function mergeByIdAndRecency<T extends { id?: string; updatedAt?: number; createdAt?: number }>(
+  localItems: T[],
+  remoteItems: T[]
+): T[] {
+  const mergedMap = new Map<string, T>();
+
+  for (const item of [...localItems, ...remoteItems]) {
+    if (!item?.id) continue;
+    const existing = mergedMap.get(item.id);
+    if (!existing) {
+      mergedMap.set(item.id, item);
+      continue;
+    }
+
+    const existingTs = existing.updatedAt ?? existing.createdAt ?? 0;
+    const incomingTs = item.updatedAt ?? item.createdAt ?? 0;
+    if (incomingTs >= existingTs) {
+      mergedMap.set(item.id, item);
+    }
+  }
+
+  return Array.from(mergedMap.values()).sort((a, b) => {
+    const aTs = a.updatedAt ?? a.createdAt ?? 0;
+    const bTs = b.updatedAt ?? b.createdAt ?? 0;
+    return bTs - aTs;
+  });
+}
+
 // Generic CRUD operations
 async function getItems<T>(key: string): Promise<T[]> {
   try {
-    const data = await AsyncStorage.getItem(key);
-    return data ? JSON.parse(data) : [];
+    const localRaw = await AsyncStorage.getItem(key);
+    const localItems = localRaw ? (JSON.parse(localRaw) as T[]) : [];
+
+    if (shouldUsePocketBase() && hasPocketBaseMapping(key)) {
+      if (isCategoryKey(key)) {
+        try {
+          const remoteCategories = await getPocketBaseCategories(key);
+          if (remoteCategories.length > 0) {
+            await AsyncStorage.setItem(key, JSON.stringify(remoteCategories));
+            return remoteCategories as unknown as T[];
+          }
+
+          const parsedLocal = Array.isArray(localItems) ? (localItems as unknown as string[]) : [];
+          if (parsedLocal.length > 0) {
+            await savePocketBaseCategories(key, parsedLocal);
+          }
+          return localItems;
+        } catch {
+          return localItems;
+        }
+      }
+
+      try {
+        const remoteItems = await getPocketBaseItems<T>(key);
+        if (remoteItems.length === 0) {
+          if (Array.isArray(localItems) && localItems.length > 0) {
+            await savePocketBaseItems<T>(key, localItems);
+          }
+          return localItems;
+        }
+
+        const merged = mergeByIdAndRecency(
+          Array.isArray(localItems) ? (localItems as any[]) : [],
+          remoteItems as any[]
+        ) as T[];
+        await AsyncStorage.setItem(key, JSON.stringify(merged));
+        return merged;
+      } catch {
+        return localItems;
+      }
+    }
+
+    return localItems;
   } catch (error) {
     console.error(`Error getting ${key}:`, error);
     return [];
@@ -255,6 +357,22 @@ async function getItems<T>(key: string): Promise<T[]> {
 async function saveItems<T>(key: string, items: T[]): Promise<void> {
   try {
     await AsyncStorage.setItem(key, JSON.stringify(items));
+
+    if (shouldUsePocketBase() && hasPocketBaseMapping(key)) {
+      if (isCategoryKey(key)) {
+        try {
+          await savePocketBaseCategories(key, items as unknown as string[]);
+        } catch (error) {
+          console.warn(`PocketBase category sync failed for ${key}:`, error);
+        }
+      } else {
+        try {
+          await savePocketBaseItems<T>(key, items);
+        } catch (error) {
+          console.warn(`PocketBase sync failed for ${key}:`, error);
+        }
+      }
+    }
   } catch (error) {
     console.error(`Error saving ${key}:`, error);
   }
@@ -294,6 +412,7 @@ async function updateItem<T extends { id: string }>(key: string, id: string, upd
 }
 
 async function deleteItem<T extends { id: string }>(key: string, id: string): Promise<void> {
+
   const items = await getItems<T>(key);
   const filtered = items.filter(item => item.id !== id);
   await saveItems(key, filtered);
@@ -471,6 +590,83 @@ export const referenceStorage = {
   update: (id: string, updates: Partial<ReferenceItem>) => updateItem<ReferenceItem>(STORAGE_KEYS.REFERENCE, id, updates),
   delete: (id: string) => deleteItem<ReferenceItem>(STORAGE_KEYS.REFERENCE, id),
 };
+
+export const notesStorage = {
+  getAll: () => getItems<NoteItem>(STORAGE_KEYS.NOTES),
+  add: (item: Omit<NoteItem, 'id' | 'createdAt'>) => addItem<NoteItem>(STORAGE_KEYS.NOTES, item),
+  update: (id: string, updates: Partial<NoteItem>) => updateItem<NoteItem>(STORAGE_KEYS.NOTES, id, updates),
+  delete: (id: string) => deleteItem<NoteItem>(STORAGE_KEYS.NOTES, id),
+  saveAll: (items: NoteItem[]) => saveItems(STORAGE_KEYS.NOTES, items),
+};
+
+export const noteSectionsStorage = {
+  getAll: () => getItems<NoteSection>(STORAGE_KEYS.NOTE_SECTIONS),
+  add: (item: Omit<NoteSection, 'id' | 'createdAt'>) => addItem<NoteSection>(STORAGE_KEYS.NOTE_SECTIONS, item),
+  update: (id: string, updates: Partial<NoteSection>) => updateItem<NoteSection>(STORAGE_KEYS.NOTE_SECTIONS, id, updates),
+  delete: (id: string) => deleteItem<NoteSection>(STORAGE_KEYS.NOTE_SECTIONS, id),
+  saveAll: (items: NoteSection[]) => saveItems(STORAGE_KEYS.NOTE_SECTIONS, items),
+};
+
+export const dashboardStorage = {
+  getByStorageKey: <T>(storageKey: string) => getItems<T>(storageKey),
+};
+
+const APP_STORAGE_KEYS = [
+  ...Object.values(STORAGE_KEYS),
+  `${STORAGE_KEYS.WEBSITE}_CATEGORIES`,
+];
+
+type AppBackupPayload = {
+  version: 1;
+  exportedAt: string;
+  data: Record<string, any[]>;
+};
+
+export async function resetLocalAppData(): Promise<void> {
+  await AsyncStorage.multiRemove(APP_STORAGE_KEYS);
+}
+
+export async function exportAppBackup(): Promise<string> {
+  const data: Record<string, any[]> = {};
+
+  for (const key of APP_STORAGE_KEYS) {
+    const raw = await AsyncStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : [];
+    data[key] = Array.isArray(parsed) ? parsed : [];
+  }
+
+  const payload: AppBackupPayload = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    data,
+  };
+
+  return JSON.stringify(payload, null, 2);
+}
+
+export async function importAppBackup(backupJson: string): Promise<void> {
+  const parsed = JSON.parse(backupJson);
+  const data = parsed?.data;
+
+  if (!parsed || typeof parsed !== 'object' || !data || typeof data !== 'object') {
+    throw new Error('Invalid backup file format.');
+  }
+
+  // Replace-all restore: write each managed key from backup, fallback to empty array.
+  for (const key of APP_STORAGE_KEYS) {
+    const value = (data as Record<string, unknown>)[key];
+    const list = Array.isArray(value) ? value : [];
+    await saveItems(key, list);
+  }
+}
+
+export async function resetAllAppData(): Promise<void> {
+  await resetLocalAppData();
+
+  if (shouldUsePocketBase()) {
+    await clearPocketBaseAppData();
+  }
+}
 
 export const marketingCategoryStorage = {
   getAll: async (): Promise<string[]> => {

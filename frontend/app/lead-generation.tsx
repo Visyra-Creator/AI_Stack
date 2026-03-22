@@ -26,7 +26,6 @@ import { useTheme } from '@/src/context/ThemeContext';
 import { Card } from '@/src/components/common/Card';
 import { FormInput } from '@/src/components/common/FormInput';
 import { Select } from '@/src/components/common/Select';
-import { Button } from '@/src/components/common/Button';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { leadGenerationStorage, leadGenerationCategoryStorage, LeadGenerationItem } from '@/src/services/storage';
 
@@ -42,7 +41,7 @@ type ViewMode = 'normal' | 'gallery';
 export default function LeadGenerationScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth } = useWindowDimensions();
   const galleryColumns = 4;
   const gap = 1;
   const galleryCardWidth = (windowWidth - (galleryColumns - 1) * gap) / galleryColumns;
@@ -654,6 +653,17 @@ export default function LeadGenerationScreen() {
                 ) : (
                   <View style={[styles.galleryPlaceholder, { backgroundColor: colors.surface }]}>
                     <Ionicons name="people-outline" size={24} color={colors.textSecondary} />
+                    <Text style={[styles.galleryPlaceholderText, { color: colors.textSecondary }]}>No image</Text>
+                    <TouchableOpacity
+                      style={[styles.galleryAddImageCta, { backgroundColor: colors.background + 'D9' }]}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        openEditModal(item);
+                      }}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={[styles.galleryAddImageCtaText, { color: colors.text }]}>Add image</Text>
+                    </TouchableOpacity>
                   </View>
                 )}
                 <View style={styles.galleryOverlay}>
@@ -1129,6 +1139,22 @@ const styles = StyleSheet.create({
     height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  galleryPlaceholderText: {
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 6,
+    opacity: 0.85,
+  },
+  galleryAddImageCta: {
+    marginTop: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  galleryAddImageCtaText: {
+    fontSize: 10,
+    fontWeight: '700',
   },
   galleryOverlay: {
     position: 'absolute',

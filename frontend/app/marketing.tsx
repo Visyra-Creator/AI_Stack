@@ -70,6 +70,8 @@ export default function MarketingScreen() {
     link: '',
     image: undefined as string | undefined,
     file: undefined as string | undefined,
+    images: [] as string[],
+    files: [] as string[],
   });
 
   const loadItems = useCallback(async () => {
@@ -211,6 +213,8 @@ export default function MarketingScreen() {
       link: '',
       image: undefined,
       file: undefined,
+      images: [],
+      files: [],
     });
     setEditingItem(null);
   };
@@ -231,6 +235,8 @@ export default function MarketingScreen() {
       link: item.link,
       image: item.image,
       file: item.file,
+      images: item.images || (item.image ? [item.image] : []),
+      files: item.files || (item.file ? [item.file] : []),
     });
     setModalVisible(true);
   };
@@ -241,10 +247,16 @@ export default function MarketingScreen() {
       return;
     }
 
+    const payload = {
+      ...formData,
+      image: formData.images[0],
+      file: formData.files[0],
+    };
+
     if (editingItem) {
-      await marketingStorage.update(editingItem.id, formData);
+      await marketingStorage.update(editingItem.id, payload);
     } else {
-      await marketingStorage.add(formData);
+      await marketingStorage.add(payload);
     }
 
     await loadItems();
@@ -311,15 +323,19 @@ export default function MarketingScreen() {
   const pickFile = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
+        multiple: true,
         copyToCacheDirectory: true,
       });
 
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        // Store file info as JSON string
+      if (!result.canceled && result.assets.length > 0) {
+        const nextFiles = result.assets.map((asset) =>
+          JSON.stringify({ name: asset.name, uri: asset.uri, size: asset.size })
+        );
+        const merged = [...formData.files, ...nextFiles];
         setFormData({
           ...formData,
-          file: JSON.stringify({ name: asset.name, uri: asset.uri, size: asset.size }),
+          files: merged,
+          file: merged[0],
         });
       }
     } catch (error) {
@@ -331,20 +347,26 @@ export default function MarketingScreen() {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        selectionLimit: 10,
         allowsEditing: false,
         quality: 0.9,
       });
 
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        setFormData({
-          ...formData,
-          image: JSON.stringify({
+      if (!result.canceled && result.assets.length > 0) {
+        const nextImages = result.assets.map((asset) =>
+          JSON.stringify({
             name: asset.fileName || `image-${Date.now()}`,
             uri: asset.uri,
             width: asset.width,
             height: asset.height,
-          }),
+          })
+        );
+        const merged = [...formData.images, ...nextImages].slice(0, 10);
+        setFormData({
+          ...formData,
+          images: merged,
+          image: merged[0],
         });
       }
     } catch (error) {
@@ -377,6 +399,8 @@ export default function MarketingScreen() {
     if (!raw) return '';
     return raw.split('\n')[0].trim();
   };
+
+  const getFirstImage = (item: MarketingItem) => item.images?.[0] || item.image;
 
   const filteredItems = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
@@ -532,11 +556,22 @@ export default function MarketingScreen() {
                   color={(item.isFavorite ?? false) ? '#FF6B6B' : '#FFFFFF'}
                 />
               </TouchableOpacity>
-              {getImageUri(item.image) ? (
-                <Image source={{ uri: getImageUri(item.image) as string }} style={styles.galleryImage} resizeMode="cover" />
+              {getImageUri(getFirstImage(item)) ? (
+                <Image source={{ uri: getImageUri(getFirstImage(item)) as string }} style={styles.galleryImage} resizeMode="cover" />
               ) : (
                 <View style={[styles.galleryPlaceholder, { backgroundColor: colors.surface }]}>
                   <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
+                  <Text style={[styles.galleryPlaceholderText, { color: colors.textSecondary }]}>No image</Text>
+                  <TouchableOpacity
+                    style={[styles.galleryAddImageCta, { backgroundColor: colors.background + 'D9' }]}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      openEditModal(item);
+                    }}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[styles.galleryAddImageCtaText, { color: colors.text }]}>Add image</Text>
+                  </TouchableOpacity>
                 </View>
               )}
               <View style={styles.galleryOverlay}>
@@ -563,8 +598,8 @@ export default function MarketingScreen() {
               onEdit={() => openEditModal(item)}
               onDelete={() => handleDelete(item)}
             >
-              {getImageUri(item.image) && (
-                <Image source={{ uri: getImageUri(item.image) as string }} style={styles.cardImage} resizeMode="cover" />
+              {getImageUri(getFirstImage(item)) && (
+                <Image source={{ uri: getImageUri(getFirstImage(item)) as string }} style={styles.cardImage} resizeMode="cover" />
               )}
               <View style={styles.cardFooter}>
                 {item.toolLink && (
@@ -718,34 +753,50 @@ export default function MarketingScreen() {
                 onPress={pickImage}
               >
                 <Ionicons name="image-outline" size={18} color={colors.textSecondary} />
-                <Text style={[styles.uploadButtonText, { color: colors.text }]}>Select Image</Text>
+                <Text style={[styles.uploadButtonText, { color: colors.text }]}>Select Images</Text>
               </TouchableOpacity>
 
-              {getImageUri(formData.image) && (
-                <View style={styles.imagePreviewWrap}>
-                  <Image source={{ uri: getImageUri(formData.image) as string }} style={styles.imagePreview} resizeMode="cover" />
-                  <TouchableOpacity
-                    style={[styles.imageRemoveButton, { backgroundColor: colors.background }]}
-                    onPress={() => setFormData({ ...formData, image: undefined })}
-                  >
-                    <Ionicons name="close-circle" size={18} color={colors.danger} />
-                  </TouchableOpacity>
+              {formData.images.length > 0 && (
+                <View style={styles.previewListWrap}>
+                  {formData.images.map((imageStr, index) => (
+                    <View key={`${imageStr.slice(0, 24)}-${index}`} style={styles.imagePreviewWrap}>
+                      <Image source={{ uri: getImageUri(imageStr) as string }} style={styles.imagePreview} resizeMode="cover" />
+                      <TouchableOpacity
+                        style={[styles.imageRemoveButton, { backgroundColor: colors.background }]}
+                        onPress={() => {
+                          const next = formData.images.filter((_, i) => i !== index);
+                          setFormData({ ...formData, images: next, image: next[0] });
+                        }}
+                      >
+                        <Ionicons name="close-circle" size={18} color={colors.danger} />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
                 </View>
               )}
             </View>
 
             <View style={styles.fileSection}>
               <Text style={[styles.fileLabel, { color: colors.textSecondary }]}>File Upload</Text>
-              <Button title="Select File" onPress={pickFile} variant="outline" />
-              {formData.file && (
-                <View style={[styles.fileItem, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Ionicons name="document-outline" size={20} color={colors.primary} />
-                  <Text style={[styles.fileName, { color: colors.text }]} numberOfLines={1}>
-                    {getFileName(formData.file)}
-                  </Text>
-                  <TouchableOpacity onPress={() => setFormData({ ...formData, file: undefined })}>
-                    <Ionicons name="close-circle" size={20} color={colors.danger} />
-                  </TouchableOpacity>
+              <Button title="Select Files" onPress={pickFile} variant="outline" />
+              {formData.files.length > 0 && (
+                <View style={styles.fileListWrap}>
+                  {formData.files.map((fileStr, index) => (
+                    <View key={`${fileStr.slice(0, 24)}-${index}`} style={[styles.fileItem, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                      <Ionicons name="document-outline" size={20} color={colors.primary} />
+                      <Text style={[styles.fileName, { color: colors.text }]} numberOfLines={1}>
+                        {getFileName(fileStr)}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => {
+                          const next = formData.files.filter((_, i) => i !== index);
+                          setFormData({ ...formData, files: next, file: next[0] });
+                        }}
+                      >
+                        <Ionicons name="close-circle" size={20} color={colors.danger} />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
                 </View>
               )}
             </View>
@@ -940,6 +991,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  galleryPlaceholderText: {
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 6,
+    opacity: 0.85,
+  },
+  galleryAddImageCta: {
+    marginTop: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  galleryAddImageCtaText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
   galleryFavoriteButton: {
     position: 'absolute',
     top: 6,
@@ -1053,6 +1120,12 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
   },
+  previewListWrap: {
+    marginTop: 10,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
   imagePreview: {
     width: '100%',
     height: '100%',
@@ -1078,6 +1151,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginTop: 8,
     borderWidth: 1,
+    gap: 8,
+  },
+  fileListWrap: {
+    marginTop: 2,
     gap: 8,
   },
   fileName: {

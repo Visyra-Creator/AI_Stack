@@ -7,10 +7,22 @@ import { useTheme } from '@/src/context/ThemeContext';
 interface ImagePickerProps {
   label: string;
   value?: string;
+  values?: string[];
+  multiple?: boolean;
+  maxSelection?: number;
   onChange: (base64: string | undefined) => void;
+  onChangeValues?: (base64List: string[]) => void;
 }
 
-export const ImagePicker: React.FC<ImagePickerProps> = ({ label, value, onChange }) => {
+export const ImagePicker: React.FC<ImagePickerProps> = ({
+  label,
+  value,
+  values,
+  multiple = false,
+  maxSelection = 10,
+  onChange,
+  onChangeValues,
+}) => {
   const { colors } = useTheme();
   const [previewSize, setPreviewSize] = useState({ width: 1, height: 1 });
 
@@ -18,10 +30,12 @@ export const ImagePicker: React.FC<ImagePickerProps> = ({ label, value, onChange
   const MAX_PREVIEW_HEIGHT = 280;
 
   useEffect(() => {
-    if (!value) {
+    if (!value && !multiple) {
       setPreviewSize({ width: 1, height: 1 });
     }
-  }, [value]);
+  }, [value, multiple]);
+
+  const currentValues = multiple ? (values || []) : value ? [value] : [];
 
   const pickImage = async () => {
     const permission = await ExpoImagePicker.requestMediaLibraryPermissionsAsync();
@@ -32,58 +46,109 @@ export const ImagePicker: React.FC<ImagePickerProps> = ({ label, value, onChange
 
     const result = await ExpoImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
+      allowsEditing: !multiple,
+      allowsMultipleSelection: multiple,
+      selectionLimit: multiple ? maxSelection : 1,
       quality: 0.7,
       base64: true,
     });
 
-    if (!result.canceled && result.assets[0].base64) {
-      onChange(`data:image/jpeg;base64,${result.assets[0].base64}`);
+    if (!result.canceled && result.assets.length > 0) {
+      const picked = result.assets
+        .map((asset) => (asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : null))
+        .filter((item): item is string => !!item);
+
+      if (picked.length === 0) return;
+
+      if (multiple) {
+        const merged = [...currentValues, ...picked].slice(0, maxSelection);
+        onChangeValues?.(merged);
+      } else {
+        onChange(picked[0]);
+      }
     }
+  };
+
+  const removeImageAt = (index: number) => {
+    if (!multiple) {
+      onChange(undefined);
+      return;
+    }
+    const next = currentValues.filter((_, i) => i !== index);
+    onChangeValues?.(next);
   };
 
   return (
     <View style={styles.container}>
       <Text style={[styles.label, { color: colors.textSecondary }]}>{label}</Text>
-      {value ? (
-        <View
-          style={[
-            styles.imageContainer,
-            {
-              width: previewSize.width,
-              height: previewSize.height,
-            },
-          ]}
-        >
-          <Image
-            source={{ uri: value }}
-            style={[styles.image, { borderColor: colors.border, backgroundColor: colors.surface }]}
-            resizeMode="contain"
-            onLoad={(event) => {
-              const { width, height } = event.nativeEvent.source;
-              if (width && height) {
-                const scale = Math.min(MAX_PREVIEW_WIDTH / width, MAX_PREVIEW_HEIGHT / height, 1);
-                setPreviewSize({
-                  width: Math.round(width * scale),
-                  height: Math.round(height * scale),
-                });
-              }
-            }}
-          />
-          <TouchableOpacity
-            style={[styles.removeButton, { backgroundColor: colors.danger }]}
-            onPress={() => onChange(undefined)}
+      {currentValues.length > 0 ? (
+        multiple ? (
+          <View style={styles.multiGrid}>
+            {currentValues.map((img, index) => (
+              <View key={`${img.slice(0, 24)}-${index}`} style={styles.multiImageContainer}>
+                <Image
+                  source={{ uri: img }}
+                  style={[styles.multiImage, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                  resizeMode="cover"
+                />
+                <TouchableOpacity
+                  style={[styles.removeButton, { backgroundColor: colors.danger }]}
+                  onPress={() => removeImageAt(index)}
+                >
+                  <Ionicons name="close" size={16} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            ))}
+            {currentValues.length < maxSelection && (
+              <TouchableOpacity
+                style={[styles.addMoreTile, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={pickImage}
+              >
+                <Ionicons name="add" size={24} color={colors.textSecondary} />
+                <Text style={[styles.addMoreText, { color: colors.textSecondary }]}>Add</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : (
+          <View
+            style={[
+              styles.imageContainer,
+              {
+                width: previewSize.width,
+                height: previewSize.height,
+              },
+            ]}
           >
-            <Ionicons name="close" size={16} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
+            <Image
+              source={{ uri: currentValues[0] }}
+              style={[styles.image, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              resizeMode="contain"
+              onLoad={(event) => {
+                const { width, height } = event.nativeEvent.source;
+                if (width && height) {
+                  const scale = Math.min(MAX_PREVIEW_WIDTH / width, MAX_PREVIEW_HEIGHT / height, 1);
+                  setPreviewSize({
+                    width: Math.round(width * scale),
+                    height: Math.round(height * scale),
+                  });
+                }
+              }}
+            />
+            <TouchableOpacity
+              style={[styles.removeButton, { backgroundColor: colors.danger }]}
+              onPress={() => removeImageAt(0)}
+            >
+              <Ionicons name="close" size={16} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+        )
       ) : (
         <TouchableOpacity
           style={[styles.picker, { backgroundColor: colors.surface, borderColor: colors.border }]}
           onPress={pickImage}
         >
           <Ionicons name="image-outline" size={32} color={colors.textSecondary} />
-          <Text style={[styles.pickerText, { color: colors.textSecondary }]}>Tap to select image</Text>
+          <Text style={[styles.pickerText, { color: colors.textSecondary }]}>Tap to select {multiple ? 'images' : 'image'}</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -130,5 +195,37 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  multiGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  multiImageContainer: {
+    width: 92,
+    height: 92,
+    borderRadius: 10,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  multiImage: {
+    width: '100%',
+    height: '100%',
+    borderWidth: 1,
+    borderRadius: 10,
+  },
+  addMoreTile: {
+    width: 92,
+    height: 92,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addMoreText: {
+    fontSize: 11,
+    marginTop: 2,
+    fontWeight: '600',
   },
 });

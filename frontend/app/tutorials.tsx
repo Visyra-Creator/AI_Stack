@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -38,7 +38,10 @@ type ViewMode = 'normal' | 'gallery';
 export default function TutorialsScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const cloudSyncEnabled =
+    process.env.EXPO_PUBLIC_USE_POCKETBASE === 'true' &&
+    !!process.env.EXPO_PUBLIC_POCKETBASE_URL;
+  const { width: windowWidth } = useWindowDimensions();
   const galleryColumns = 4;
   const gap = 1;
   const galleryCardWidth = (windowWidth - (galleryColumns - 1) * gap) / galleryColumns;
@@ -56,6 +59,10 @@ export default function TutorialsScreen() {
   const [viewMode, setViewMode] = useState<ViewMode>('normal');
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [sortModalVisible, setSortModalVisible] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
+  const [syncToast, setSyncToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const syncToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [formData, setFormData] = useState({
     tutorialName: '',
@@ -68,6 +75,28 @@ export default function TutorialsScreen() {
   const loadItems = useCallback(async () => {
     const data = await tutorialsStorage.getAll();
     setItems(data);
+    if (cloudSyncEnabled) {
+      setLastSyncedAt(Date.now());
+    }
+  }, [cloudSyncEnabled]);
+
+  const showSyncToast = useCallback((text: string, type: 'success' | 'error') => {
+    if (syncToastTimerRef.current) {
+      clearTimeout(syncToastTimerRef.current);
+    }
+    setSyncToast({ text, type });
+    syncToastTimerRef.current = setTimeout(() => {
+      setSyncToast(null);
+      syncToastTimerRef.current = null;
+    }, 2000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (syncToastTimerRef.current) {
+        clearTimeout(syncToastTimerRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -79,6 +108,34 @@ export default function TutorialsScreen() {
     await loadItems();
     setRefreshing(false);
   };
+
+  const formatRelativeSync = (timestamp: number): string => {
+    const diff = Date.now() - timestamp;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (seconds < 60) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    return `${days}d ago`;
+  };
+
+  const handleManualSync = useCallback(async () => {
+    if (!cloudSyncEnabled || isManualSyncing) return;
+    setIsManualSyncing(true);
+    try {
+      await loadItems();
+      setLastSyncedAt(Date.now());
+      showSyncToast('Synced successfully', 'success');
+    } catch (error) {
+      console.error('Manual tutorials sync failed:', error);
+      showSyncToast('Sync failed', 'error');
+    } finally {
+      setIsManualSyncing(false);
+    }
+  }, [cloudSyncEnabled, isManualSyncing, loadItems, showSyncToast]);
 
   const resetForm = () => {
     setFormData({
@@ -296,10 +353,41 @@ export default function TutorialsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[styles.title, { color: colors.text }]}>Tutorials</Text>
-        <TouchableOpacity onPress={openAddModal} style={[styles.addButton, { backgroundColor: colors.primary }]}>
-          <Ionicons name="add" size={24} color="#FFFFFF" />
-        </TouchableOpacity>
+        <View style={styles.headerCenter}>
+          <Text style={[styles.title, { color: colors.text }]}>Tutorials</Text>
+          <Text style={[styles.syncStatusText, { color: colors.textSecondary }]}>
+            {cloudSyncEnabled ? 'Offline + Cloud sync' : 'Offline only'}
+          </Text>
+          {cloudSyncEnabled && (
+            <Text style={[styles.syncMetaText, { color: colors.textSecondary }]}>
+              {lastSyncedAt ? `Last sync: ${formatRelativeSync(lastSyncedAt)}` : 'Last sync: pending'}
+            </Text>
+          )}
+        </View>
+        <View style={styles.headerActions}>
+          {cloudSyncEnabled && (
+            <TouchableOpacity
+              onPress={handleManualSync}
+              disabled={isManualSyncing}
+              style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            >
+              <Ionicons
+                name={isManualSyncing ? 'sync' : 'sync-outline'}
+                size={18}
+                color={colors.textSecondary}
+              />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            onPress={() => router.push('/')}
+            style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          >
+            <Ionicons name="home-outline" size={18} color={colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={openAddModal} style={[styles.addButton, { backgroundColor: colors.primary }]}>
+            <Ionicons name="add" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.searchContainer}>
@@ -438,6 +526,17 @@ export default function TutorialsScreen() {
               </TouchableOpacity>
               <View style={[styles.galleryPlaceholder, { backgroundColor: colors.surface }]}>
                 <Ionicons name="play-circle-outline" size={24} color={colors.textSecondary} />
+                <Text style={[styles.galleryPlaceholderText, { color: colors.textSecondary }]}>No image</Text>
+                <TouchableOpacity
+                  style={[styles.galleryAddImageCta, { backgroundColor: colors.background + 'D9' }]}
+                  onPress={(event) => {
+                    event.stopPropagation();
+                    openEditModal(item);
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.galleryAddImageCtaText, { color: colors.text }]}>Add thumbnail</Text>
+                </TouchableOpacity>
               </View>
               <View style={styles.galleryOverlay}>
                 <Text style={styles.galleryTitle} numberOfLines={1}>{item.tutorialName}</Text>
@@ -633,6 +732,17 @@ export default function TutorialsScreen() {
           </View>
         </View>
       </Modal>
+
+      {syncToast && (
+        <View
+          style={[
+            styles.syncToast,
+            { backgroundColor: syncToast.type === 'success' ? '#16A34A' : colors.danger },
+          ]}
+        >
+          <Text style={styles.syncToastText}>{syncToast.text}</Text>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -648,12 +758,42 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 12,
+  },
   backButton: {
     padding: 8,
   },
   title: {
     fontSize: 20,
     fontWeight: '600',
+  },
+  syncStatusText: {
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 2,
+    opacity: 0.85,
+  },
+  syncMetaText: {
+    fontSize: 10,
+    fontWeight: '500',
+    marginTop: 2,
+    opacity: 0.7,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   addButton: {
     width: 40,
@@ -752,6 +892,22 @@ const styles = StyleSheet.create({
     height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  galleryPlaceholderText: {
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 6,
+    opacity: 0.85,
+  },
+  galleryAddImageCta: {
+    marginTop: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  galleryAddImageCtaText: {
+    fontSize: 10,
+    fontWeight: '700',
   },
   galleryOverlay: {
     position: 'absolute',
@@ -909,5 +1065,21 @@ const styles = StyleSheet.create({
   },
   bottomPadding: {
     height: 40,
+  },
+  syncToast: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    bottom: 24,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  syncToastText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

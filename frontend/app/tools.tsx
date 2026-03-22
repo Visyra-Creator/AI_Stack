@@ -38,7 +38,7 @@ type ViewMode = 'normal' | 'gallery';
 export default function ToolsScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth } = useWindowDimensions();
   const galleryColumns = 4;
   const gap = 1;
   const galleryCardWidth = (windowWidth - (galleryColumns - 1) * gap) / galleryColumns;
@@ -63,6 +63,7 @@ export default function ToolsScreen() {
     description: '',
     instructions: '',
     image: undefined as string | undefined,
+    images: [] as string[],
   });
 
   const loadItems = useCallback(async () => {
@@ -373,11 +374,22 @@ export default function ToolsScreen() {
                   color={(item.isFavorite ?? false) ? '#FF6B6B' : '#FFFFFF'}
                 />
               </TouchableOpacity>
-              {item.image ? (
-                <Image source={{ uri: item.image }} style={styles.galleryImage} resizeMode="cover" />
+              {(item.images?.[0] || item.image) ? (
+                <Image source={{ uri: item.images?.[0] || item.image }} style={styles.galleryImage} resizeMode="cover" />
               ) : (
                 <View style={[styles.galleryPlaceholder, { backgroundColor: colors.surface }]}>
                   <Ionicons name="construct-outline" size={24} color={colors.textSecondary} />
+                  <Text style={[styles.galleryPlaceholderText, { color: colors.textSecondary }]}>No image</Text>
+                  <TouchableOpacity
+                    style={[styles.galleryAddImageCta, { backgroundColor: colors.background + 'D9' }]}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      openEditModal(item);
+                    }}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[styles.galleryAddImageCtaText, { color: colors.text }]}>Add image</Text>
+                  </TouchableOpacity>
                 </View>
               )}
               <View style={styles.galleryOverlay}>
@@ -441,8 +453,10 @@ export default function ToolsScreen() {
             />
             <ImagePicker
               label="Tool Image"
-              value={formData.image}
-              onChange={(image) => setFormData({ ...formData, image })}
+              multiple
+              values={formData.images}
+              onChange={() => undefined}
+              onChangeValues={(images) => setFormData({ ...formData, images, image: images[0] })}
             />
             <View style={styles.bottomPadding} />
           </ScrollView>
@@ -483,10 +497,10 @@ export default function ToolsScreen() {
                 </View>
               )}
 
-              {!!selectedItem.image && (
+              {!!(selectedItem.images?.[0] || selectedItem.image) && (
                 <View style={styles.detailsSection}>
                   <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Image</Text>
-                  <Image source={{ uri: selectedItem.image }} style={styles.detailsImage} resizeMode="cover" />
+                  <Image source={{ uri: selectedItem.images?.[0] || selectedItem.image }} style={styles.detailsImage} resizeMode="cover" />
                 </View>
               )}
 
@@ -656,6 +670,22 @@ const styles = StyleSheet.create({
     height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  galleryPlaceholderText: {
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 6,
+    opacity: 0.85,
+  },
+  galleryAddImageCta: {
+    marginTop: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  galleryAddImageCtaText: {
+    fontSize: 10,
+    fontWeight: '700',
   },
   galleryImage: {
     width: '100%',

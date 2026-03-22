@@ -1,0 +1,137 @@
+{
+  "collections": [
+    {
+      "name": "resources",
+      "type": "base",
+      "listRule": "",
+      "viewRule": "",
+      "createRule": "",
+      "updateRule": "",
+      "deleteRule": "",
+      "fields": [
+        {
+          "name": "legacy_id",
+          "type": "text",
+          "required": true,
+          "options": {
+            "min": 1,
+            "max": 100,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "kind",
+          "type": "text",
+          "required": true,
+          "options": {
+            "min": 1,
+            "max": 60,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "title",
+          "type": "text",
+          "required": false,
+          "options": {
+            "min": 0,
+            "max": 250,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "category",
+          "type": "text",
+          "required": false,
+          "options": {
+            "min": 0,
+            "max": 120,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "is_favorite",
+          "type": "bool",
+          "required": false,
+          "options": {}
+        },
+        {
+          "name": "payload",
+          "type": "text",
+          "required": true,
+          "options": {
+            "min": 2,
+            "max": 0,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "created_at",
+          "type": "date",
+          "required": false,
+          "options": {
+            "min": "",
+            "max": ""
+          }
+        },
+        {
+          "name": "updated_at",
+          "type": "date",
+          "required": false,
+          "options": {
+            "min": "",
+            "max": ""
+          }
+        },
+        {
+          "name": "favorited_at",
+          "type": "date",
+          "required": false,
+          "options": {
+            "min": "",
+            "max": ""
+          }
+        }
+      ],
+      "indexes": [
+        "CREATE INDEX idx_resources_kind_updated ON resources (kind, updated_at)",
+        "CREATE UNIQUE INDEX idx_resources_kind_legacy ON resources (kind, legacy_id)"
+      ]
+    },
+    {
+      "name": "resource_categories",
+      "type": "base",
+      "listRule": "",
+      "viewRule": "",
+      "createRule": "",
+      "updateRule": "",
+      "deleteRule": "",
+      "fields": [
+        {
+          "name": "kind",
+          "type": "text",
+          "required": true,
+          "options": {
+            "min": 1,
+            "max": 60,
+            "pattern": ""
+          }
+        },
+        {
+          "name": "values",
+          "type": "text",
+          "required": true,
+          "options": {
+            "min": 2,
+            "max": 0,
+            "pattern": ""
+          }
+        }
+      ],
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_resource_categories_kind ON resource_categories (kind)"
+      ]
+    }
+  ]
+}
+

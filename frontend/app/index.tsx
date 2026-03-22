@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,10 +17,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/src/context/ThemeContext';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { dashboardStorage } from '@/src/services/storage';
 
 const { width: screenWidth } = Dimensions.get('window');
-const RECENT_IMAGE_SIZE = Math.floor((screenWidth - 40 - 24) / 4);
 
 interface RecentGeneratedImage {
   id: string;
@@ -104,6 +103,11 @@ const menuSections: MenuSection[] = [
 export default function HomeScreen() {
   const router = useRouter();
   const { colors, mode, toggleTheme } = useTheme();
+  const cloudSyncEnabled =
+    process.env.EXPO_PUBLIC_USE_POCKETBASE === 'true' &&
+    !!process.env.EXPO_PUBLIC_POCKETBASE_URL;
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
   const [isMenuVisible, setIsMenuVisible] = useState(false);
   const [dateTime, setDateTime] = useState(new Date());
 
@@ -118,6 +122,19 @@ export default function HomeScreen() {
   const [topCategories, setTopCategories] = useState<CategoryStats[]>([]);
   const [lastActivityTime, setLastActivityTime] = useState<number>(0);
   const [recentGeneratedImages, setRecentGeneratedImages] = useState<RecentGeneratedImage[]>([]);
+  const [syncToast, setSyncToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const syncToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showSyncToast = useCallback((text: string, type: 'success' | 'error') => {
+    if (syncToastTimerRef.current) {
+      clearTimeout(syncToastTimerRef.current);
+    }
+    setSyncToast({ text, type });
+    syncToastTimerRef.current = setTimeout(() => {
+      setSyncToast(null);
+      syncToastTimerRef.current = null;
+    }, 2000);
+  }, []);
 
   const formatDateTime = (date: Date) => {
     const options: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' };
@@ -143,7 +160,7 @@ export default function HomeScreen() {
     return 'A while ago';
   };
 
-  const loadAllData = async () => {
+  const loadAllData = useCallback(async () => {
     const now = Date.now();
     const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
 
@@ -157,8 +174,7 @@ export default function HomeScreen() {
     // Load data from all categories
     for (const section of sections) {
       try {
-        const data = await AsyncStorage.getItem(section.storageKey);
-        const items = data ? JSON.parse(data) : [];
+        const items = await dashboardStorage.getByStorageKey<any>(section.storageKey);
 
         const categoryItems: DashboardItem[] = items.map((item: any) => ({
           id: item.id,
@@ -206,7 +222,7 @@ export default function HomeScreen() {
         // Pull ONLY generated images from Prompts
         if (section.storageKey === 'prompts') {
           for (const item of items) {
-            const singleImageUri = item.generatedImage;
+            const singleImageUri = item.generatedImages?.[0] || item.generatedImage;
             if (singleImageUri) {
                if (typeof singleImageUri === 'string' && singleImageUri.startsWith('{')) {
                  try {
@@ -264,12 +280,28 @@ export default function HomeScreen() {
     setTopCategories(topCatsArray);
     setLastActivityTime(maxLastActivity);
     setRecentGeneratedImages(sortedGeneratedImages);
+    if (cloudSyncEnabled) {
+      setLastSyncedAt(Date.now());
+    }
+  }, [cloudSyncEnabled]);
+
+  const formatRelativeSync = (timestamp: number): string => {
+    const diff = Date.now() - timestamp;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (seconds < 60) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    return `${days}d ago`;
   };
 
   useFocusEffect(
     useCallback(() => {
       loadAllData();
-    }, [])
+    }, [loadAllData])
   );
 
   useFocusEffect(
@@ -294,10 +326,33 @@ export default function HomeScreen() {
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (syncToastTimerRef.current) {
+        clearTimeout(syncToastTimerRef.current);
+      }
+    };
+  }, []);
+
   const navigateToSection = (route: string) => {
     setIsMenuVisible(false);
     router.push(route as any);
   };
+
+  const handleManualSync = useCallback(async () => {
+    if (!cloudSyncEnabled || isManualSyncing) return;
+    setIsManualSyncing(true);
+    try {
+      await loadAllData();
+      setLastSyncedAt(Date.now());
+      showSyncToast('Synced successfully', 'success');
+    } catch (error) {
+      console.error('Manual dashboard sync failed:', error);
+      showSyncToast('Sync failed', 'error');
+    } finally {
+      setIsManualSyncing(false);
+    }
+  }, [cloudSyncEnabled, isManualSyncing, loadAllData, showSyncToast]);
 
   const { date, time } = formatDateTime(dateTime);
   const getMostActiveCategory = (): string => {
@@ -315,8 +370,29 @@ export default function HomeScreen() {
           <Text style={[styles.lastActivity, { color: colors.textSecondary }]}>
             {lastActivityTime > 0 ? `Last activity: ${formatRelativeTime(lastActivityTime)}` : 'No activity yet'}
           </Text>
+          <Text style={[styles.syncStatus, { color: colors.textSecondary }]}>
+            {cloudSyncEnabled ? 'Sync: Local + PocketBase' : 'Sync: Local only'}
+          </Text>
+          {cloudSyncEnabled && (
+            <Text style={[styles.syncMeta, { color: colors.textSecondary }]}>
+              {lastSyncedAt ? `Last sync: ${formatRelativeSync(lastSyncedAt)}` : 'Last sync: pending'}
+            </Text>
+          )}
         </View>
         <View style={styles.headerActions}>
+          {cloudSyncEnabled && (
+            <TouchableOpacity
+              style={[styles.headerButton, { backgroundColor: colors.surface }]}
+              onPress={handleManualSync}
+              disabled={isManualSyncing}
+            >
+              <Ionicons
+                name={isManualSyncing ? 'sync' : 'sync-outline'}
+                size={20}
+                color={colors.text}
+              />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             style={[styles.headerButton, { backgroundColor: colors.surface }]}
             onPress={() => setIsMenuVisible(true)}
@@ -618,6 +694,17 @@ export default function HomeScreen() {
       </Modal>
 
       {/* Floating Action Button */}
+      {syncToast && (
+        <View
+          style={[
+            styles.syncToast,
+            { backgroundColor: syncToast.type === 'success' ? '#16A34A' : colors.danger },
+          ]}
+        >
+          <Text style={styles.syncToastText}>{syncToast.text}</Text>
+        </View>
+      )}
+
       <TouchableOpacity
         style={[styles.fab, { backgroundColor: colors.primary }]}
         onPress={() => setIsMenuVisible(true)}
@@ -653,6 +740,18 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontWeight: '500',
     opacity: 0.8,
+  },
+  syncStatus: {
+    fontSize: 11,
+    marginTop: 4,
+    fontWeight: '500',
+    opacity: 0.7,
+  },
+  syncMeta: {
+    fontSize: 10,
+    marginTop: 2,
+    fontWeight: '500',
+    opacity: 0.65,
   },
   headerActions: {
     flexDirection: 'row',
@@ -1098,5 +1197,21 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 12,
     elevation: 8,
+  },
+  syncToast: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    bottom: 92,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  syncToastText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

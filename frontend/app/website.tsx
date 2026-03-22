@@ -18,7 +18,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/src/context/ThemeContext';
-import { Card } from '@/src/components/common/Card';
 import { FormInput } from '@/src/components/common/FormInput';
 import { Select } from '@/src/components/common/Select';
 import { EmptyState } from '@/src/components/common/EmptyState';
