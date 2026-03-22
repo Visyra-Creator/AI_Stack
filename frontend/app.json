@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "AI Keeper",
-    "slug": "frontend",
+    "slug": "ai-keeper",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -42,11 +42,6 @@
     "experiments": {
       "typedRoutes": true
     },
-    "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "2bc3b9a3-0316-47c4-af7b-8aad3a945796"
-      }
-    }
+    "owner": "sagar3198"
   }
 }
