@@ -1,0 +1,5 @@
+node_modules/
+.git/
+.vscode/
+DEBUGGING_GUIDE.md
+scripts/
