@@ -24,6 +24,7 @@ import { Card } from '@/src/components/common/Card';
 import { FormInput } from '@/src/components/common/FormInput';
 import { MultiSelect } from '@/src/components/common/MultiSelect';
 import { EmptyState } from '@/src/components/common/EmptyState';
+import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { contentCreationStorage, contentCreationCategoryStorage, ContentCreationItem } from '@/src/services/storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -848,15 +849,16 @@ export default function ContentCreationScreen() {
               {selectedItem.images && selectedItem.images.length > 0 && (
                 <View style={styles.detailsSection}>
                   <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Images</Text>
+                  <Text style={[styles.detailsImageHint, { color: colors.textSecondary }]}>Double tap an image to view full screen</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.detailsImagesRow}>
                     {selectedItem.images.map((imageStr, index) => {
                       try {
                         const parsed = typeof imageStr === 'string' ? JSON.parse(imageStr) : imageStr;
                         if (!parsed.uri) return null;
                         return (
-                          <Image
+                          <DoubleTapImage
                             key={`${parsed.uri}-${index}`}
-                            source={{ uri: parsed.uri }}
+                            uri={parsed.uri}
                             style={styles.detailsImagePreview}
                             resizeMode="contain"
                           />
@@ -1366,6 +1368,11 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  detailsImageHint: {
+    fontSize: 11,
+    marginBottom: 8,
+    opacity: 0.75,
   },
   detailsValue: {
     fontSize: 16,

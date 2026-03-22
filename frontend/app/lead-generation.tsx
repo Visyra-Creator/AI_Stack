@@ -27,6 +27,7 @@ import { Card } from '@/src/components/common/Card';
 import { FormInput } from '@/src/components/common/FormInput';
 import { Select } from '@/src/components/common/Select';
 import { EmptyState } from '@/src/components/common/EmptyState';
+import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { leadGenerationStorage, leadGenerationCategoryStorage, LeadGenerationItem } from '@/src/services/storage';
 
 const SORT_OPTIONS = [
@@ -762,14 +763,15 @@ export default function LeadGenerationScreen() {
               {selectedItem.images && selectedItem.images.length > 0 && (
                 <View style={styles.detailsSection}>
                   <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Images</Text>
+                  <Text style={[styles.detailsImageHint, { color: colors.textSecondary }]}>Double tap an image to view full screen</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.detailsImagesRow}>
                     {selectedItem.images.map((image, index) => {
                       const uri = getImageUri(image);
                       if (!uri) return null;
                       return (
-                        <Image
+                        <DoubleTapImage
                           key={`${image}-${index}`}
-                          source={{ uri }}
+                          uri={uri}
                           style={styles.detailsImagePreview}
                           resizeMode="contain"
                         />
@@ -1280,6 +1282,11 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  detailsImageHint: {
+    fontSize: 11,
+    marginBottom: 8,
+    opacity: 0.75,
   },
   detailsValue: {
     fontSize: 15,

@@ -25,6 +25,7 @@ import { Card } from '@/src/components/common/Card';
 import { FormInput } from '@/src/components/common/FormInput';
 import { ImagePicker } from '@/src/components/common/ImagePicker';
 import { EmptyState } from '@/src/components/common/EmptyState';
+import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { toolsStorage, ToolItem } from '@/src/services/storage';
 
 const SORT_OPTIONS = [
@@ -500,7 +501,12 @@ export default function ToolsScreen() {
               {!!(selectedItem.images?.[0] || selectedItem.image) && (
                 <View style={styles.detailsSection}>
                   <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Image</Text>
-                  <Image source={{ uri: selectedItem.images?.[0] || selectedItem.image }} style={styles.detailsImage} resizeMode="cover" />
+                  <Text style={[styles.detailsImageHint, { color: colors.textSecondary }]}>Double tap the image to view full screen</Text>
+                  <DoubleTapImage
+                    uri={selectedItem.images?.[0] || selectedItem.image || ''}
+                    style={styles.detailsImage}
+                    resizeMode="cover"
+                  />
                 </View>
               )}
 
@@ -761,6 +767,11 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  detailsImageHint: {
+    fontSize: 11,
+    marginBottom: 8,
+    opacity: 0.75,
   },
   detailsValue: {
     fontSize: 14,

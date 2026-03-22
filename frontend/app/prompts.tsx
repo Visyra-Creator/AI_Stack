@@ -26,6 +26,7 @@ import { FormInput } from '@/src/components/common/FormInput';
 import { Select } from '@/src/components/common/Select';
 import { ImagePicker } from '@/src/components/common/ImagePicker';
 import { EmptyState } from '@/src/components/common/EmptyState';
+import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { promptsStorage, promptsCategoryStorage, PromptItem } from '@/src/services/storage';
 
 const PROMPT_TYPES = ['general', 'personal'];
@@ -701,12 +702,20 @@ export default function PromptsScreen() {
                 {renderLinkedText(selectedItem.prompt)}
               </View>
 
-              {(selectedItem.inputImage || selectedItem.generatedImage) && (
+              {((selectedItem.inputImages && selectedItem.inputImages.length > 0) ||
+                (selectedItem.generatedImages && selectedItem.generatedImages.length > 0) ||
+                selectedItem.inputImage ||
+                selectedItem.generatedImage) && (
                 <View style={styles.detailsSection}>
                   <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Images</Text>
+                  <Text style={[styles.detailsImageHint, { color: colors.textSecondary }]}>Double tap an image to view full screen</Text>
                   <View style={styles.detailsImagesRow}>
-                    {selectedItem.inputImage && <Image source={{ uri: selectedItem.inputImage }} style={styles.detailsImage} />}
-                    {selectedItem.generatedImage && <Image source={{ uri: selectedItem.generatedImage }} style={styles.detailsImage} />}
+                    {(selectedItem.inputImages || (selectedItem.inputImage ? [selectedItem.inputImage] : [])).map((img, idx) => (
+                      <DoubleTapImage key={`input-${idx}`} uri={img} style={styles.detailsImage} resizeMode="cover" />
+                    ))}
+                    {(selectedItem.generatedImages || (selectedItem.generatedImage ? [selectedItem.generatedImage] : [])).map((img, idx) => (
+                      <DoubleTapImage key={`generated-${idx}`} uri={img} style={styles.detailsImage} resizeMode="cover" />
+                    ))}
                   </View>
                 </View>
               )}
@@ -1203,6 +1212,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 4,
     textTransform: 'uppercase',
+  detailsImageHint: {
+    fontSize: 11,
+    marginBottom: 8,
+    opacity: 0.75,
+  },
     letterSpacing: 0.5,
   },
   detailsValue: {
