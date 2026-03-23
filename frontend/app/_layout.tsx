@@ -47,9 +47,13 @@ function RootLayoutNav() {
     <NavThemeProvider value={navTheme}>
       <SafeAreaView
         style={[styles.container, { backgroundColor: colors.background }]}
-        edges={['left', 'right', 'bottom']}
+        edges={['top', 'left', 'right', 'bottom']}
       >
-        <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
+        <StatusBar
+          style={mode === 'dark' ? 'light' : 'dark'}
+          translucent={false}
+          backgroundColor={colors.background}
+        />
         <Stack
           screenOptions={{
             headerShown: false,
