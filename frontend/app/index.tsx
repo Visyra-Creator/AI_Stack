@@ -401,6 +401,12 @@ export default function HomeScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.headerButton, { backgroundColor: colors.surface }]}
+            onPress={() => router.push('/photography')}
+          >
+            <Ionicons name="camera-outline" size={20} color={colors.text} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.headerButton, { backgroundColor: colors.surface }]}
             onPress={toggleTheme}
           >
             <Ionicons name={mode === 'dark' ? 'sunny-outline' : 'moon-outline'} size={20} color={colors.text} />

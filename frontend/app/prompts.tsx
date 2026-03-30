@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -23,7 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/src/context/ThemeContext';
 import { Card } from '@/src/components/common/Card';
 import { FormInput } from '@/src/components/common/FormInput';
-import { Select } from '@/src/components/common/Select';
+import { MultiSelect } from '@/src/components/common/MultiSelect';
 import { ImagePicker } from '@/src/components/common/ImagePicker';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
@@ -74,7 +74,7 @@ export default function PromptsScreen() {
     inputImages: [] as string[],
     generatedImages: [] as string[],
     aiToolUsed: '',
-    category: 'image',
+    categories: [] as string[],
     type: 'general' as 'general' | 'personal',
   });
 
@@ -85,7 +85,12 @@ export default function PromptsScreen() {
 
   const loadCategories = useCallback(async () => {
     const data = await promptsCategoryStorage.getAll();
-    setCategories(data);
+    const sorted = [...data].sort((a, b) => {
+      if (a.toLowerCase() === 'other') return 1;
+      if (b.toLowerCase() === 'other') return -1;
+      return a.localeCompare(b, undefined, { sensitivity: 'base' });
+    });
+    setCategories(sorted);
   }, []);
 
   useEffect(() => {
@@ -158,14 +163,14 @@ export default function PromptsScreen() {
     setCategories(updatedCategories);
 
     const allItems = await promptsStorage.getAll();
-    const affectedItems = allItems.filter(item => item.category === editingCategory);
+    const affectedItems = allItems.filter(item => item.categories?.includes(editingCategory));
     await Promise.all(
-      affectedItems.map(item => promptsStorage.update(item.id, { category: value })),
+      affectedItems.map(item => promptsStorage.update(item.id, { categories: updatedCategories })),
     );
 
     setFormData(prev => ({
       ...prev,
-      category: prev.category === editingCategory ? value : prev.category,
+      categories: prev.categories.includes(editingCategory) ? updatedCategories : prev.categories,
     }));
 
     setEditingCategory(null);
@@ -190,14 +195,14 @@ export default function PromptsScreen() {
             setCategories(updatedCategories);
 
             const allItems = await promptsStorage.getAll();
-            const affectedItems = allItems.filter(item => item.category === categoryToDelete);
+            const affectedItems = allItems.filter(item => item.categories?.includes(categoryToDelete));
             await Promise.all(
-              affectedItems.map(item => promptsStorage.update(item.id, { category: fallbackCategory })),
+              affectedItems.map(item => promptsStorage.update(item.id, { categories: fallbackCategory })),
             );
 
             setFormData(prev => ({
               ...prev,
-              category: prev.category === categoryToDelete ? fallbackCategory : prev.category,
+              categories: prev.categories.includes(categoryToDelete) ? [fallbackCategory] : prev.categories,
             }));
 
             if (editingCategory === categoryToDelete) {
@@ -222,7 +227,7 @@ export default function PromptsScreen() {
       inputImages: [],
       generatedImages: [],
       aiToolUsed: '',
-      category: getDefaultCategory(),
+      categories: [],
       type: activeTab,
     });
     setEditingItem(null);
@@ -241,10 +246,10 @@ export default function PromptsScreen() {
       prompt: item.prompt,
       inputImage: item.inputImage,
       generatedImage: item.generatedImage,
-      inputImages: item.inputImages || (item.inputImage ? [item.inputImage] : []),
-      generatedImages: item.generatedImages || (item.generatedImage ? [item.generatedImage] : []),
+      inputImages: item.inputImages || [],
+      generatedImages: item.generatedImages || [],
       aiToolUsed: item.aiToolUsed,
-      category: item.category,
+      categories: item.categories || (item.category ? [item.category] : []),
       type: item.type,
     });
     setModalVisible(true);
@@ -306,20 +311,26 @@ export default function PromptsScreen() {
 
   const baseItems = items.filter(item => item.type === activeTab);
 
-  const filteredItems = baseItems.filter(item => {
+  const filteredItems = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
-    const matchesSearch =
-      !query ||
-      item.promptName.toLowerCase().includes(query) ||
-      item.prompt.toLowerCase().includes(query) ||
-      item.aiToolUsed.toLowerCase().includes(query) ||
-      item.category.toLowerCase().includes(query);
 
-    const matchesFilter =
-      activeFilter === 'All' ||
-      (activeFilter === 'Favorites' ? (item.isFavorite ?? false) : item.category === activeFilter);
-    return matchesSearch && matchesFilter;
-  });
+    return items.filter(item => {
+      if (item.type !== activeTab) return false;
+
+      const matchesSearch =
+        !query ||
+        item.promptName.toLowerCase().includes(query) ||
+        (item.description || '').toLowerCase().includes(query) ||
+        item.prompt.toLowerCase().includes(query) ||
+        item.aiToolUsed.toLowerCase().includes(query);
+
+      const matchesFilter =
+        activeFilter === 'All' ||
+        (activeFilter === 'Favorites' ? (item.isFavorite ?? false) : (item.categories || (item.category ? [item.category] : [])).includes(activeFilter));
+
+      return matchesSearch && matchesFilter;
+    });
+  }, [items, searchQuery, activeFilter, activeTab]);
 
   const displayedItems = [...filteredItems].sort((a, b) => {
     if (activeSort === 'name') {
@@ -336,6 +347,13 @@ export default function PromptsScreen() {
 
   const toggleFavoritesOnly = () => {
     setActiveFilter(prev => (prev === 'Favorites' ? 'All' : 'Favorites'));
+  };
+
+  const resetFilters = () => {
+    setSearchQuery('');
+    setActiveFilter('All');
+    setActiveSort('recent');
+    setViewMode('normal');
   };
 
   const getCategoryFieldConfig = (category: string) => {
@@ -449,8 +467,8 @@ export default function PromptsScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        <TouchableOpacity onPress={() => router.replace('/')} style={styles.backButton}>
+          <Ionicons name="home-outline" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: colors.text }]}>Prompts</Text>
         <TouchableOpacity onPress={openAddModal} style={[styles.addButton, { backgroundColor: colors.primary }]}>
@@ -538,6 +556,12 @@ export default function PromptsScreen() {
               {viewMode === 'normal' ? 'Gallery' : 'List'}
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.favoriteFilterButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={resetFilters}
+          >
+            <Ionicons name="refresh-outline" size={16} color={colors.textSecondary} />
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -558,7 +582,7 @@ export default function PromptsScreen() {
             <Card
               key={item.id}
               title={item.promptName}
-              subtitle={getPromptPreviewLine(item)}
+              subtitle={item.description || item.prompt}
               subtitleLines={1}
               onPress={() => openDetailsModal(item)}
               onFavorite={() => toggleFavorite(item)}
@@ -566,26 +590,19 @@ export default function PromptsScreen() {
               onEdit={() => openEditModal(item)}
               onDelete={() => handleDelete(item)}
             >
-              <View style={styles.cardContent}>
-                <View style={styles.cardMeta}>
-                  <View style={[styles.categoryBadge, { backgroundColor: colors.primary + '20' }]}>
-                    <Ionicons name={getCategoryIcon(item.category)} size={14} color={colors.primary} />
-                    <Text style={[styles.categoryText, { color: colors.primary }]}>
-                      {item.category.charAt(0).toUpperCase() + item.category.slice(1)}
-                    </Text>
-                  </View>
-                  {item.aiToolUsed && (
-                    <Text style={[styles.toolText, { color: colors.textSecondary }]}>
-                      Tool: {item.aiToolUsed}
-                    </Text>
-                  )}
+              <View style={styles.cardFooter}>
+                <View style={styles.metaTagsWrap}>
+                  {(item.categories || (item.category ? [item.category] : [])).map((tag, index) => (
+                    <View key={`${tag}-${index}`} style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
+                      <Text style={[styles.metaTagText, { color: colors.primary }]}>{tag}</Text>
+                    </View>
+                  ))}
                 </View>
-                {(item.inputImage || item.generatedImage) && (
-                  <View style={styles.imagesRow}>
-                    {item.inputImage && <Image source={{ uri: item.inputImage }} style={styles.thumbnail} />}
-                    {item.generatedImage && <Image source={{ uri: item.generatedImage }} style={styles.thumbnail} />}
-                  </View>
-                )}
+                <View style={[styles.badge, { backgroundColor: colors.primary + '15' }]}>
+                  <Text style={[styles.badgeText, { color: colors.primary }]}>
+                    {item.aiToolUsed}
+                  </Text>
+                </View>
               </View>
             </Card>
           ))}
@@ -670,25 +687,21 @@ export default function PromptsScreen() {
           </View>
 
           {selectedItem && (
-            <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
-              <Text style={[styles.detailsTitle, { color: colors.text }]}>{selectedItem.promptName}</Text>
+            <ScrollView style={styles.detailsContent} showsVerticalScrollIndicator={false}>
+              <Text style={[styles.detailsName, { color: colors.text }]}>{selectedItem.promptName}</Text>
 
-              <View style={styles.detailsMetaRow}>
-                <View style={[styles.categoryBadge, { backgroundColor: colors.primary + '20' }]}>
-                  <Ionicons name={getCategoryIcon(selectedItem.category)} size={14} color={colors.primary} />
-                  <Text style={[styles.categoryText, { color: colors.primary }]}>{selectedItem.category}</Text>
-                </View>
-                <View style={[styles.typeBadge, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Text style={[styles.typeBadgeText, { color: colors.textSecondary }]}>{selectedItem.type}</Text>
-                </View>
+              <View style={styles.metaTagsWrap}>
+                {(selectedItem.categories || (selectedItem.category ? [selectedItem.category] : [])).map((tag, index) => (
+                  <View key={`${tag}-${index}`} style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
+                    <Text style={[styles.metaTagText, { color: colors.primary }]}>{tag}</Text>
+                  </View>
+                ))}
               </View>
 
-              {!!selectedItem.aiToolUsed && (
-                <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>AI Tool Used</Text>
-                  <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.aiToolUsed}</Text>
-                </View>
-              )}
+              <View style={styles.detailsSection}>
+                <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>AI Tool Used</Text>
+                <Text style={[styles.detailsValue, { color: colors.text }]}>{selectedItem.aiToolUsed}</Text>
+              </View>
 
               {!!selectedItem.description?.trim() && (
                 <View style={styles.detailsSection}>
@@ -765,11 +778,11 @@ export default function PromptsScreen() {
               value={formData.type}
               onChange={(type) => setFormData({ ...formData, type: type as any })}
             />
-            <Select
-              label="Category"
+            <MultiSelect
+              label="Categories"
               options={categories}
-              value={formData.category}
-              onChange={(category) => setFormData({ ...formData, category })}
+              selectedValues={formData.categories}
+              onSelect={(categories) => setFormData({ ...formData, categories })}
             />
             <TouchableOpacity
               style={[styles.manageCategoriesButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
@@ -784,52 +797,46 @@ export default function PromptsScreen() {
             </View>
 
             <FormInput
-              label="AI Tool Used"
-              placeholder="e.g., Midjourney, DALL-E, ChatGPT"
+              label="AI Tool Used *"
+              placeholder="e.g., Midjourney, ChatGPT"
               value={formData.aiToolUsed}
               onChangeText={(text) => setFormData({ ...formData, aiToolUsed: text })}
             />
-            <FormInput
-              label="Prompt"
-              placeholder={categoryConfig.promptPlaceholder}
-              value={formData.prompt}
-              onChangeText={(text) => setFormData({ ...formData, prompt: text })}
-              multiline
-              numberOfLines={8}
-              style={styles.textArea}
-            />
 
-            {categoryConfig.showInputImage && (
-              <ImagePicker
-                label="Input/Reference Image"
-                multiple
-                values={formData.inputImages}
-                onChange={() => undefined}
-                onChangeValues={(imgs) =>
-                  setFormData({
-                    ...formData,
-                    inputImages: imgs,
-                    inputImage: imgs[0],
-                  })
-                }
-              />
-            )}
 
-            {categoryConfig.showGeneratedImage && (
-              <ImagePicker
-                label="Generated Image"
-                multiple
-                values={formData.generatedImages}
-                onChange={() => undefined}
-                onChangeValues={(imgs) =>
-                  setFormData({
-                    ...formData,
-                    generatedImages: imgs,
-                    generatedImage: imgs[0],
-                  })
-                }
-              />
-            )}
+            <View style={styles.imageSection}>
+              {categoryConfig.showInputImage && (
+                <ImagePicker
+                  label="Input/Reference Image"
+                  multiple
+                  values={formData.inputImages}
+                  onChange={() => undefined}
+                  onChangeValues={(imgs) =>
+                    setFormData({
+                      ...formData,
+                      inputImages: imgs,
+                      inputImage: imgs[0],
+                    })
+                  }
+                />
+              )}
+
+              {categoryConfig.showGeneratedImage && (
+                <ImagePicker
+                  label="Generated Image"
+                  multiple
+                  values={formData.generatedImages}
+                  onChange={() => undefined}
+                  onChangeValues={(imgs) =>
+                    setFormData({
+                      ...formData,
+                      generatedImages: imgs,
+                      generatedImage: imgs[0],
+                    })
+                  }
+                />
+              )}
+            </View>
             <View style={styles.bottomPadding} />
           </ScrollView>
         </KeyboardAvoidingView>
@@ -1115,6 +1122,36 @@ const styles = StyleSheet.create({
     color: '#E5E7EB',
     marginTop: 2,
   },
+  cardFooter: {
+    marginTop: 12,
+  },
+  metaTagsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 4,
+  },
+  metaTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  metaTagText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  badge: {
+    backgroundColor: 'rgba(255, 107, 107, 0.15)',
+    borderRadius: 12,
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    marginTop: 4,
+  },
+  badgeText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#FF6B6B',
+  },
   cardContent: {
     marginTop: 12,
   },
@@ -1182,7 +1219,7 @@ const styles = StyleSheet.create({
     minHeight: 90,
     textAlignVertical: 'top',
   },
-  detailsTitle: {
+  detailsName: {
     fontSize: 22,
     fontWeight: '700',
     marginBottom: 12,
@@ -1212,11 +1249,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 4,
     textTransform: 'uppercase',
-  detailsImageHint: {
-    fontSize: 11,
-    marginBottom: 8,
-    opacity: 0.75,
-  },
     letterSpacing: 0.5,
   },
   detailsValue: {

@@ -26,7 +26,8 @@ import { FormInput } from '@/src/components/common/FormInput';
 import { ImagePicker } from '@/src/components/common/ImagePicker';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
-import { toolsStorage, ToolItem } from '@/src/services/storage';
+import { toolStorage, ToolItem, toolCategoryStorage } from '@/src/services/storage';
+import { MultiSelect } from '@/src/components/common/MultiSelect';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -50,6 +51,7 @@ export default function ToolsScreen() {
   const [selectedItem, setSelectedItem] = useState<ToolItem | null>(null);
   const [editingItem, setEditingItem] = useState<ToolItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [categories, setCategories] = useState<string[]>([]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
@@ -63,22 +65,34 @@ export default function ToolsScreen() {
     link: '',
     description: '',
     instructions: '',
+    categories: [] as string[],
     image: undefined as string | undefined,
     images: [] as string[],
   });
 
   const loadItems = useCallback(async () => {
-    const data = await toolsStorage.getAll();
+    const data = await toolStorage.getAll();
     setItems(data);
+  }, []);
+
+  const loadCategories = useCallback(async () => {
+    const data = await toolCategoryStorage.getAll();
+    const sorted = [...data].sort((a, b) => {
+      if (a.toLowerCase() === 'other') return 1;
+      if (b.toLowerCase() === 'other') return -1;
+      return a.localeCompare(b);
+    });
+    setCategories(sorted);
   }, []);
 
   useEffect(() => {
     loadItems();
-  }, [loadItems]);
+    loadCategories();
+  }, [loadItems, loadCategories]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadItems();
+    await Promise.all([loadItems(), loadCategories()]);
     setRefreshing(false);
   };
 
@@ -88,7 +102,9 @@ export default function ToolsScreen() {
       link: '',
       description: '',
       instructions: '',
+      categories: [],
       image: undefined,
+      images: [],
     });
     setEditingItem(null);
   };
@@ -105,7 +121,9 @@ export default function ToolsScreen() {
       link: item.link,
       description: item.description,
       instructions: item.instructions,
+      categories: item.categories || [],
       image: item.image,
+      images: item.images || [],
     });
     setModalVisible(true);
   };
@@ -212,11 +230,11 @@ export default function ToolsScreen() {
         item.toolName.toLowerCase().includes(query) ||
         item.description.toLowerCase().includes(query) ||
         item.instructions.toLowerCase().includes(query) ||
-        item.link.toLowerCase().includes(query);
+        (item.link || '').toLowerCase().includes(query);
 
       const matchesFilter =
         activeFilter === 'All' ||
-        (activeFilter === 'Favorites' ? (item.isFavorite ?? false) : true);
+        (activeFilter === 'Favorites' ? (item.isFavorite ?? false) : (item.categories || []).includes(activeFilter));
 
       return matchesSearch && matchesFilter;
     });
@@ -233,11 +251,18 @@ export default function ToolsScreen() {
     return sorted;
   }, [filteredItems, activeSort]);
 
-  const filterOptions = ['All', 'Favorites'];
+  const filterOptions = ['All', 'Favorites', ...categories];
   const isFavoritesOnly = activeFilter === 'Favorites';
 
   const toggleFavoritesOnly = () => {
     setActiveFilter(prev => (prev === 'Favorites' ? 'All' : 'Favorites'));
+  };
+
+  const resetFilters = () => {
+    setSearchQuery('');
+    setActiveFilter('All');
+    setActiveSort('recent');
+    setViewMode('normal');
   };
 
   return (
@@ -307,6 +332,12 @@ export default function ToolsScreen() {
               {viewMode === 'normal' ? 'Gallery' : 'List'}
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.favoriteFilterButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={resetFilters}
+          >
+            <Ionicons name="refresh-outline" size={16} color={colors.textSecondary} />
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -328,7 +359,7 @@ export default function ToolsScreen() {
             <Card
               key={item.id}
               title={item.toolName}
-              subtitle={getToolPreviewLine(item)}
+              subtitle={getCardSubtitle(item)}
               subtitleLines={1}
               onPress={() => openDetailsModal(item)}
               onFavorite={() => toggleFavorite(item)}
@@ -336,11 +367,15 @@ export default function ToolsScreen() {
               onEdit={() => openEditModal(item)}
               onDelete={() => handleDelete(item)}
             >
-              {item.link && (
-                <Text style={[styles.link, { color: colors.primary }]} numberOfLines={1}>
-                  {item.link}
-                </Text>
-              )}
+              <View style={styles.cardFooter}>
+                <View style={styles.metaTagsWrap}>
+                  {(item.categories || []).map((tag, index) => (
+                    <View key={`${tag}-${index}`} style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
+                      <Text style={[styles.metaTagText, { color: colors.primary }]}>{tag}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
             </Card>
           ))}
         </ScrollView>
@@ -445,20 +480,31 @@ export default function ToolsScreen() {
             />
             <FormInput
               label="Instructions"
-              placeholder="How to use this tool..."
+              placeholder="Step-by-step instructions..."
               value={formData.instructions}
               onChangeText={(text) => setFormData({ ...formData, instructions: text })}
               multiline
               numberOfLines={5}
               style={styles.textArea}
             />
-            <ImagePicker
-              label="Tool Image"
-              multiple
-              values={formData.images}
-              onChange={() => undefined}
-              onChangeValues={(images) => setFormData({ ...formData, images, image: images[0] })}
+
+            <MultiSelect
+              label="Categories"
+              options={categories}
+              selectedValues={formData.categories}
+              onSelect={(categories) => setFormData({ ...formData, categories })}
             />
+
+            <View style={styles.imageSection}>
+              <ImagePicker
+                label="Tool Image"
+                multiple
+                values={formData.images}
+                onChange={() => undefined}
+                onChangeValues={(images) => setFormData({ ...formData, images, image: images[0] })}
+              />
+            </View>
+
             <View style={styles.bottomPadding} />
           </ScrollView>
         </KeyboardAvoidingView>
@@ -477,8 +523,16 @@ export default function ToolsScreen() {
           </View>
 
           {selectedItem && (
-            <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
-              <Text style={[styles.detailsTitle, { color: colors.text }]}>{selectedItem.toolName}</Text>
+            <ScrollView style={styles.detailsContent} showsVerticalScrollIndicator={false}>
+              <Text style={[styles.detailsName, { color: colors.text }]}>{selectedItem.toolName}</Text>
+
+              <View style={styles.metaTagsWrap}>
+                {(selectedItem.categories || []).map((tag, index) => (
+                  <View key={`${tag}-${index}`} style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
+                    <Text style={[styles.metaTagText, { color: colors.primary }]}>{tag}</Text>
+                  </View>
+                ))}
+              </View>
 
               {!!selectedItem.link?.trim() && (
                 <View style={styles.detailsSection}>
@@ -753,10 +807,14 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
   },
-  detailsTitle: {
+  detailsName: {
     fontSize: 22,
     fontWeight: '700',
     marginBottom: 12,
+  },
+  detailsContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
   },
   detailsSection: {
     marginBottom: 14,
@@ -830,5 +888,23 @@ const styles = StyleSheet.create({
   },
   bottomPadding: {
     height: 40,
+  },
+  cardFooter: {
+    marginTop: 12,
+  },
+  metaTagsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 4,
+  },
+  metaTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  metaTagText: {
+    fontSize: 11,
+    fontWeight: '600',
   },
 });

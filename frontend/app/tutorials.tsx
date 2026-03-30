@@ -25,7 +25,8 @@ import { Card } from '@/src/components/common/Card';
 import { FormInput } from '@/src/components/common/FormInput';
 import { Button } from '@/src/components/common/Button';
 import { EmptyState } from '@/src/components/common/EmptyState';
-import { tutorialsStorage, TutorialItem } from '@/src/services/storage';
+import { tutorialsStorage, TutorialItem, tutorialsCategoryStorage } from '@/src/services/storage';
+import { MultiSelect } from '@/src/components/common/MultiSelect';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -52,6 +53,7 @@ export default function TutorialsScreen() {
   const [selectedItem, setSelectedItem] = useState<TutorialItem | null>(null);
   const [editingItem, setEditingItem] = useState<TutorialItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [categories, setCategories] = useState<string[]>([]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
@@ -69,6 +71,7 @@ export default function TutorialsScreen() {
     description: '',
     instructions: '',
     videoLink: '',
+    categories: [] as string[],
     files: [] as string[],
   });
 
@@ -80,32 +83,24 @@ export default function TutorialsScreen() {
     }
   }, [cloudSyncEnabled]);
 
-  const showSyncToast = useCallback((text: string, type: 'success' | 'error') => {
-    if (syncToastTimerRef.current) {
-      clearTimeout(syncToastTimerRef.current);
-    }
-    setSyncToast({ text, type });
-    syncToastTimerRef.current = setTimeout(() => {
-      setSyncToast(null);
-      syncToastTimerRef.current = null;
-    }, 2000);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (syncToastTimerRef.current) {
-        clearTimeout(syncToastTimerRef.current);
-      }
-    };
+  const loadCategories = useCallback(async () => {
+    const data = await tutorialsCategoryStorage.getAll();
+    const sorted = [...data].sort((a, b) => {
+      if (a.toLowerCase() === 'other') return 1;
+      if (b.toLowerCase() === 'other') return -1;
+      return a.localeCompare(b);
+    });
+    setCategories(sorted);
   }, []);
 
   useEffect(() => {
     loadItems();
-  }, [loadItems]);
+    loadCategories();
+  }, [loadItems, loadCategories]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadItems();
+    await Promise.all([loadItems(), loadCategories()]);
     setRefreshing(false);
   };
 
@@ -143,6 +138,7 @@ export default function TutorialsScreen() {
       description: '',
       instructions: '',
       videoLink: '',
+      categories: [],
       files: [],
     });
     setEditingItem(null);
@@ -160,6 +156,7 @@ export default function TutorialsScreen() {
       description: item.description,
       instructions: item.instructions,
       videoLink: item.videoLink || '',
+      categories: item.categories || [],
       files: item.files || [],
     });
     setModalVisible(true);
@@ -322,7 +319,7 @@ export default function TutorialsScreen() {
 
       const matchesFilter =
         activeFilter === 'All' ||
-        (activeFilter === 'Favorites' ? (item.isFavorite ?? false) : true);
+        (activeFilter === 'Favorites' ? (item.isFavorite ?? false) : (item.categories || []).includes(activeFilter));
 
       return matchesSearch && matchesFilter;
     });
@@ -340,11 +337,18 @@ export default function TutorialsScreen() {
     return sorted;
   }, [filteredItems, activeSort]);
 
-  const filterOptions = ['All', 'Favorites'];
+  const filterOptions = ['All', 'Favorites', ...categories];
   const isFavoritesOnly = activeFilter === 'Favorites';
 
   const toggleFavoritesOnly = () => {
     setActiveFilter(prev => (prev === 'Favorites' ? 'All' : 'Favorites'));
+  };
+
+  const resetFilters = () => {
+    setSearchQuery('');
+    setActiveFilter('All');
+    setActiveSort('recent');
+    setViewMode('normal');
   };
 
   return (
@@ -445,6 +449,12 @@ export default function TutorialsScreen() {
               {viewMode === 'normal' ? 'Gallery' : 'List'}
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.favoriteFilterButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={resetFilters}
+          >
+            <Ionicons name="refresh-outline" size={16} color={colors.textSecondary} />
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -475,6 +485,13 @@ export default function TutorialsScreen() {
               onDelete={() => handleDelete(item)}
             >
               <View style={styles.cardFooter}>
+                <View style={styles.metaTagsWrap}>
+                  {(item.categories || []).map((tag, index) => (
+                    <View key={`${tag}-${index}`} style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
+                      <Text style={[styles.metaTagText, { color: colors.primary }]}>{tag}</Text>
+                    </View>
+                  ))}
+                </View>
                 {item.videoLink && (
                   <View style={[styles.badge, { backgroundColor: colors.danger + '20' }]}>
                     <Ionicons name="videocam" size={14} color={colors.danger} />
@@ -598,6 +615,13 @@ export default function TutorialsScreen() {
               autoCapitalize="none"
             />
 
+            <MultiSelect
+              label="Categories"
+              options={categories}
+              selectedValues={formData.categories}
+              onSelect={(categories) => setFormData({ ...formData, categories })}
+            />
+
             <View style={styles.filesSection}>
               <Text style={[styles.filesLabel, { color: colors.textSecondary }]}>Files</Text>
               <Button title="Add Files" onPress={pickFiles} variant="outline" />
@@ -633,53 +657,63 @@ export default function TutorialsScreen() {
 
           {selectedItem && (
             <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
-              <Text style={[styles.detailsTitle, { color: colors.text }]}>{selectedItem.tutorialName}</Text>
+              <View style={styles.detailsContent}>
+                <Text style={[styles.detailsName, { color: colors.text }]}>{selectedItem.tutorialName}</Text>
 
-              {!!selectedItem.videoLink?.trim() && (
-                <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Video Link</Text>
-                  <TouchableOpacity onPress={() => openExternalLink(selectedItem.videoLink!)}>
-                    <Text style={[styles.detailsLink, { color: colors.primary }]} numberOfLines={2}>
-                      {selectedItem.videoLink}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {!!selectedItem.description?.trim() && (
-                <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Description</Text>
-                  {renderLinkedText(selectedItem.description)}
-                </View>
-              )}
-
-              {!!selectedItem.instructions?.trim() && (
-                <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Instructions</Text>
-                  {renderLinkedText(selectedItem.instructions)}
-                </View>
-              )}
-
-              {selectedItem.files && selectedItem.files.length > 0 && (
-                <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Files</Text>
-                  {selectedItem.files.map((file, index) => (
-                    <TouchableOpacity
-                      key={`${file}-${index}`}
-                      style={[styles.detailsFileRow, { borderColor: colors.border }]}
-                      onPress={() => openFile(file)}
-                    >
-                      <Ionicons name="document-text-outline" size={16} color={colors.primary} />
-                      <Text style={[styles.detailsFileName, { color: colors.text }]} numberOfLines={1}>
-                        {getFileName(file)}
-                      </Text>
-                      <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
-                    </TouchableOpacity>
+                <View style={styles.metaTagsWrap}>
+                  {(selectedItem.categories || []).map((tag, index) => (
+                    <View key={`${tag}-${index}`} style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
+                      <Text style={[styles.metaTagText, { color: colors.primary }]}>{tag}</Text>
+                    </View>
                   ))}
                 </View>
-              )}
 
-              <View style={styles.bottomPadding} />
+                {!!selectedItem.videoLink?.trim() && (
+                  <View style={styles.detailsSection}>
+                    <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Video Link</Text>
+                    <TouchableOpacity onPress={() => openExternalLink(selectedItem.videoLink!)}>
+                      <Text style={[styles.detailsLink, { color: colors.primary }]} numberOfLines={2}>
+                        {selectedItem.videoLink}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {!!selectedItem.description?.trim() && (
+                  <View style={styles.detailsSection}>
+                    <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Description</Text>
+                    {renderLinkedText(selectedItem.description)}
+                  </View>
+                )}
+
+                {!!selectedItem.instructions?.trim() && (
+                  <View style={styles.detailsSection}>
+                    <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Instructions</Text>
+                    {renderLinkedText(selectedItem.instructions)}
+                  </View>
+                )}
+
+                {selectedItem.files && selectedItem.files.length > 0 && (
+                  <View style={styles.detailsSection}>
+                    <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Files</Text>
+                    {selectedItem.files.map((file, index) => (
+                      <TouchableOpacity
+                        key={`${file}-${index}`}
+                        style={[styles.detailsFileRow, { borderColor: colors.border }]}
+                        onPress={() => openFile(file)}
+                      >
+                        <Ionicons name="document-text-outline" size={16} color={colors.primary} />
+                        <Text style={[styles.detailsFileName, { color: colors.text }]} numberOfLines={1}>
+                          {getFileName(file)}
+                        </Text>
+                        <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+
+                <View style={styles.bottomPadding} />
+              </View>
             </ScrollView>
           )}
         </SafeAreaView>
@@ -861,6 +895,21 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 12,
   },
+  metaTagsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 4,
+  },
+  metaTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  metaTagText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -965,7 +1014,10 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
   },
-  detailsTitle: {
+  detailsContent: {
+    marginBottom: 14,
+  },
+  detailsName: {
     fontSize: 22,
     fontWeight: '700',
     marginBottom: 12,

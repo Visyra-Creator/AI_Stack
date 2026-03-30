@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -93,7 +93,12 @@ export default function BusinessScreen() {
 
   const loadCategories = useCallback(async () => {
     const data = await businessCategoryStorage.getAll();
-    setCategories(data);
+    const sorted = [...data].sort((a, b) => {
+      if (a.toLowerCase() === 'other') return 1;
+      if (b.toLowerCase() === 'other') return -1;
+      return a.localeCompare(b);
+    });
+    setCategories(sorted);
   }, []);
 
   useEffect(() => {
@@ -396,17 +401,24 @@ export default function BusinessScreen() {
     );
   };
 
-  const filteredItems = items.filter(item => {
-    const matchesQuery =
-      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.sectionName.toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredItems = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
 
-    const matchesFilter = activeSection === 'All' || item.sectionName === activeSection;
-    const matchesFavorites = isFavoritesOnly ? (item.isFavorite ?? false) : true;
-    
-    return matchesQuery && matchesFilter && matchesFavorites;
-  });
+    return items.filter(item => {
+      const matchesSearch =
+        !query ||
+        item.name.toLowerCase().includes(query) ||
+        item.description.toLowerCase().includes(query) ||
+        item.instructions.toLowerCase().includes(query) ||
+        item.link.toLowerCase().includes(query);
+
+      const matchesFilter =
+        activeFilter === 'All' ||
+        (activeFilter === 'Favorites' ? (item.isFavorite ?? false) : (item.categories || []).includes(activeFilter));
+
+      return matchesSearch && matchesFilter;
+    });
+  }, [items, searchQuery, activeFilter]);
 
   const displayedItems = [...filteredItems].sort((a, b) => {
     if (activeSort === 'name') {

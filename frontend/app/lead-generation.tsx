@@ -29,6 +29,7 @@ import { Select } from '@/src/components/common/Select';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { leadGenerationStorage, leadGenerationCategoryStorage, LeadGenerationItem } from '@/src/services/storage';
+import { MultiSelect } from '@/src/components/common/MultiSelect';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -53,9 +54,9 @@ export default function LeadGenerationScreen() {
   const [selectedItem, setSelectedItem] = useState<LeadGenerationItem | null>(null);
   const [editingItem, setEditingItem] = useState<LeadGenerationItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [categories, setCategories] = useState<string[]>([]);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [categories, setCategories] = useState<string[]>([]);
   const [activeFilter, setActiveFilter] = useState('All');
   const [activeSort, setActiveSort] = useState<SortValue>('recent');
   const [viewMode, setViewMode] = useState<ViewMode>('normal');
@@ -72,7 +73,7 @@ export default function LeadGenerationScreen() {
     instructions: '',
     link: '',
     videoLink: '',
-    category: '',
+    categories: [] as string[],
     images: [] as string[],
     files: [] as string[],
   });
@@ -84,7 +85,12 @@ export default function LeadGenerationScreen() {
 
   const loadCategories = useCallback(async () => {
     const data = await leadGenerationCategoryStorage.getAll();
-    setCategories(data);
+    const sorted = [...data].sort((a, b) => {
+      if (a.toLowerCase() === 'other') return 1;
+      if (b.toLowerCase() === 'other') return -1;
+      return a.localeCompare(b);
+    });
+    setCategories(sorted);
   }, []);
 
   useEffect(() => {
@@ -98,120 +104,6 @@ export default function LeadGenerationScreen() {
     setRefreshing(false);
   };
 
-  const normalizeCategory = (value: string) => value.trim();
-
-  const addCategory = async () => {
-    const value = normalizeCategory(newCategoryName);
-    if (!value) {
-      Alert.alert('Error', 'Category name cannot be empty');
-      return;
-    }
-
-    if (categories.some(category => category.toLowerCase() === value.toLowerCase())) {
-      Alert.alert('Error', 'Category already exists');
-      return;
-    }
-
-    const updatedCategories = [...categories, value];
-    await leadGenerationCategoryStorage.saveAll(updatedCategories);
-    setCategories(updatedCategories);
-    setNewCategoryName('');
-  };
-
-  const startEditCategory = (category: string) => {
-    setEditingCategory(category);
-    setEditingCategoryName(category);
-  };
-
-  const saveEditedCategory = async () => {
-    if (!editingCategory) return;
-
-    const value = normalizeCategory(editingCategoryName);
-    if (!value) {
-      Alert.alert('Error', 'Category name cannot be empty');
-      return;
-    }
-
-    if (
-      categories.some(
-        category =>
-          category.toLowerCase() === value.toLowerCase() &&
-          category.toLowerCase() !== editingCategory.toLowerCase(),
-      )
-    ) {
-      Alert.alert('Error', 'Category already exists');
-      return;
-    }
-
-    const updatedCategories = categories.map(category =>
-      category === editingCategory ? value : category,
-    );
-    await leadGenerationCategoryStorage.saveAll(updatedCategories);
-    setCategories(updatedCategories);
-
-    const allItems = await leadGenerationStorage.getAll();
-    const affectedItems = allItems.filter(item => item.category === editingCategory);
-    await Promise.all(
-      affectedItems.map(item =>
-        leadGenerationStorage.update(item.id, { category: value }),
-      ),
-    );
-
-    if (activeFilter === editingCategory) {
-      setActiveFilter(value);
-    }
-
-    if (formData.category === editingCategory) {
-      setFormData(prev => ({ ...prev, category: value }));
-    }
-
-    setEditingCategory(null);
-    setEditingCategoryName('');
-    await loadItems();
-  };
-
-  const deleteCategory = (categoryToDelete: string) => {
-    Alert.alert(
-      'Delete Category',
-      `Delete "${categoryToDelete}"? This removes it from existing tools too.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            const updatedCategories = categories.filter(category => category !== categoryToDelete);
-            await leadGenerationCategoryStorage.saveAll(updatedCategories);
-            setCategories(updatedCategories);
-
-            const allItems = await leadGenerationStorage.getAll();
-            const affectedItems = allItems.filter(item => item.category === categoryToDelete);
-            await Promise.all(
-              affectedItems.map(item =>
-                leadGenerationStorage.update(item.id, { category: '' }),
-              ),
-            );
-
-            if (activeFilter === categoryToDelete) {
-              setActiveFilter('All');
-            }
-
-            if (formData.category === categoryToDelete) {
-              setFormData(prev => ({ ...prev, category: '' }));
-            }
-
-            if (editingCategory === categoryToDelete) {
-              setEditingCategory(null);
-              setEditingCategoryName('');
-            }
-
-            await loadItems();
-          },
-        },
-      ],
-    );
-  };
-
   const resetForm = () => {
     setFormData({
       name: '',
@@ -219,7 +111,7 @@ export default function LeadGenerationScreen() {
       instructions: '',
       link: '',
       videoLink: '',
-      category: '',
+      categories: [],
       images: [],
       files: [],
     });
@@ -239,7 +131,7 @@ export default function LeadGenerationScreen() {
       instructions: item.instructions,
       link: item.link,
       videoLink: item.videoLink || '',
-      category: item.category,
+      categories: item.categories || (item.category ? [item.category] : []),
       images: item.images || [],
       files: item.files || [],
     });
@@ -443,17 +335,21 @@ export default function LeadGenerationScreen() {
   };
 
   const filteredItems = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+
     return items.filter(item => {
-      const matchesQuery =
-        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.category.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesSearch =
+        !query ||
+        item.name.toLowerCase().includes(query) ||
+        item.description.toLowerCase().includes(query) ||
+        item.instructions.toLowerCase().includes(query) ||
+        item.link.toLowerCase().includes(query);
 
       const matchesFilter =
         activeFilter === 'All' ||
-        (activeFilter === 'Favorites' ? (item.isFavorite ?? false) : item.category === activeFilter);
+        (activeFilter === 'Favorites' ? (item.isFavorite ?? false) : (item.categories || (item.category ? [item.category] : [])).includes(activeFilter));
 
-      return matchesQuery && matchesFilter;
+      return matchesSearch && matchesFilter;
     });
   }, [items, searchQuery, activeFilter]);
 
@@ -580,7 +476,7 @@ export default function LeadGenerationScreen() {
             <Card
               key={item.id}
               title={item.name}
-              subtitle={getCardSubtitle(item)}
+              subtitle={item.description}
               subtitleLines={1}
               onPress={() => openDetailsModal(item)}
               onFavorite={() => toggleFavorite(item)}
@@ -589,29 +485,13 @@ export default function LeadGenerationScreen() {
               onDelete={() => handleDelete(item)}
             >
               <View style={styles.cardFooter}>
-                {item.category && (
-                  <View style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
-                    <Text style={[styles.metaTagText, { color: colors.primary }]}>{item.category}</Text>
-                  </View>
-                )}
-                {item.link && (
-                  <TouchableOpacity
-                    style={[styles.badge, { backgroundColor: colors.primary + '20' }]}
-                    onPress={() => openExternalLink(item.link)}
-                  >
-                    <Ionicons name="link" size={14} color={colors.primary} />
-                    <Text style={[styles.badgeText, { color: colors.primary }]}>Link</Text>
-                  </TouchableOpacity>
-                )}
-                {item.videoLink && (
-                  <TouchableOpacity
-                    style={[styles.badge, { backgroundColor: colors.danger + '20' }]}
-                    onPress={() => openExternalLink(item.videoLink!)}
-                  >
-                    <Ionicons name="videocam" size={14} color={colors.danger} />
-                    <Text style={[styles.badgeText, { color: colors.danger }]}>Video</Text>
-                  </TouchableOpacity>
-                )}
+                <View style={styles.metaTagsWrap}>
+                  {(item.categories || (item.category ? [item.category] : [])).map((tag, index) => (
+                    <View key={`${tag}-${index}`} style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
+                      <Text style={[styles.metaTagText, { color: colors.primary }]}>{tag}</Text>
+                    </View>
+                  ))}
+                </View>
               </View>
             </Card>
           ))}
@@ -690,96 +570,80 @@ export default function LeadGenerationScreen() {
           </View>
 
           {selectedItem && (
-            <ScrollView
-              style={styles.detailsScroll}
-              contentContainerStyle={styles.detailsScrollContent}
-              showsVerticalScrollIndicator
-            >
-              <Text style={[styles.detailsTitle, { color: colors.text }]}>{selectedItem.name}</Text>
+            <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
+              <View style={styles.detailsContent}>
+                <Text style={[styles.detailsName, { color: colors.text }]}>{selectedItem.name}</Text>
 
-              {selectedItem.category && (
-                <View style={styles.detailsTags}>
-                  <View style={[styles.detailsTag, { backgroundColor: colors.primary + '20' }]}>
-                    <Text style={[styles.detailsTagText, { color: colors.primary }]}>{selectedItem.category}</Text>
-                  </View>
-                </View>
-              )}
-
-              {!!selectedItem.description?.trim() && (
-                <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Description</Text>
-                  {renderLinkedText(selectedItem.description)}
-                </View>
-              )}
-
-              {!!selectedItem.instructions?.trim() && (
-                <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Instructions</Text>
-                  {renderLinkedText(selectedItem.instructions)}
-                </View>
-              )}
-
-              {!!selectedItem.link?.trim() && (
-                <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Link</Text>
-                  <TouchableOpacity onPress={() => openExternalLink(selectedItem.link)}>
-                    <Text style={[styles.detailsLink, { color: colors.primary }]} numberOfLines={2}>
-                      {selectedItem.link}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {!!selectedItem.videoLink?.trim() && (
-                <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Video Link</Text>
-                  <TouchableOpacity onPress={() => openExternalLink(selectedItem.videoLink!)}>
-                    <Text style={[styles.detailsLink, { color: colors.danger }]} numberOfLines={2}>
-                      {selectedItem.videoLink}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {selectedItem.files && selectedItem.files.length > 0 && (
-                <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Attachments</Text>
-                  {selectedItem.files.map((file, index) => (
-                    <TouchableOpacity
-                      key={`${file}-${index}`}
-                      style={[styles.detailsFileRow, { borderColor: colors.border }]}
-                      onPress={() => openFile(file)}
-                    >
-                      <Ionicons name="document-text-outline" size={16} color={colors.primary} />
-                      <Text style={[styles.detailsFileName, { color: colors.text }]} numberOfLines={1}>
-                        {getFileName(file)}
-                      </Text>
-                      <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
-                    </TouchableOpacity>
+                <View style={styles.metaTagsWrap}>
+                  {(selectedItem.categories || (selectedItem.category ? [selectedItem.category] : [])).map((tag, index) => (
+                    <View key={`${tag}-${index}`} style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
+                      <Text style={[styles.metaTagText, { color: colors.primary }]}>{tag}</Text>
+                    </View>
                   ))}
                 </View>
-              )}
 
-              {selectedItem.images && selectedItem.images.length > 0 && (
-                <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Images</Text>
-                  <Text style={[styles.detailsImageHint, { color: colors.textSecondary }]}>Double tap an image to view full screen</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.detailsImagesRow}>
-                    {selectedItem.images.map((image, index) => {
-                      const uri = getImageUri(image);
-                      if (!uri) return null;
-                      return (
-                        <DoubleTapImage
-                          key={`${image}-${index}`}
-                          uri={uri}
-                          style={styles.detailsImagePreview}
-                          resizeMode="contain"
-                        />
-                      );
-                    })}
-                  </ScrollView>
-                </View>
-              )}
+                {!!selectedItem.link?.trim() && (
+                  <View style={styles.detailsSection}>
+                    <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Link</Text>
+                    <TouchableOpacity onPress={() => openExternalLink(selectedItem.link)}>
+                      <Text style={[styles.detailsLink, { color: colors.primary }]} numberOfLines={2}>
+                        {selectedItem.link}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {!!selectedItem.videoLink?.trim() && (
+                  <View style={styles.detailsSection}>
+                    <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Video Link</Text>
+                    <TouchableOpacity onPress={() => openExternalLink(selectedItem.videoLink!)}>
+                      <Text style={[styles.detailsLink, { color: colors.danger }]} numberOfLines={2}>
+                        {selectedItem.videoLink}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {selectedItem.files && selectedItem.files.length > 0 && (
+                  <View style={styles.detailsSection}>
+                    <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Attachments</Text>
+                    {selectedItem.files.map((file, index) => (
+                      <TouchableOpacity
+                        key={`${file}-${index}`}
+                        style={[styles.detailsFileRow, { borderColor: colors.border }]}
+                        onPress={() => openFile(file)}
+                      >
+                        <Ionicons name="document-text-outline" size={16} color={colors.primary} />
+                        <Text style={[styles.detailsFileName, { color: colors.text }]} numberOfLines={1}>
+                          {getFileName(file)}
+                        </Text>
+                        <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+
+                {selectedItem.images && selectedItem.images.length > 0 && (
+                  <View style={styles.detailsSection}>
+                    <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Images</Text>
+                    <Text style={[styles.detailsImageHint, { color: colors.textSecondary }]}>Double tap an image to view full screen</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.detailsImagesRow}>
+                      {selectedItem.images.map((image, index) => {
+                        const uri = getImageUri(image);
+                        if (!uri) return null;
+                        return (
+                          <DoubleTapImage
+                            key={`${image}-${index}`}
+                            uri={uri}
+                            style={styles.detailsImagePreview}
+                            resizeMode="contain"
+                          />
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                )}
+              </View>
             </ScrollView>
           )}
         </SafeAreaView>
@@ -850,14 +714,21 @@ export default function LeadGenerationScreen() {
             />
             <FormInput
               label="Video Link"
-              placeholder="YouTube, tutorial link..."
+              placeholder="https://..."
               value={formData.videoLink}
               onChangeText={(text) => setFormData({ ...formData, videoLink: text })}
               keyboardType="url"
               autoCapitalize="none"
             />
 
-            <View style={styles.uploadSection}>
+            <MultiSelect
+              label="Categories"
+              options={categories}
+              selectedValues={formData.categories}
+              onSelect={(categories) => setFormData({ ...formData, categories })}
+            />
+
+            <View style={styles.imageSection}>
               <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>Upload Images</Text>
               <TouchableOpacity
                 style={[styles.uploadButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
@@ -1118,6 +989,27 @@ const styles = StyleSheet.create({
   list: {
     flex: 1,
   },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginTop: 12,
+  },
+  metaTagsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 4,
+  },
+  metaTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  metaTagText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
   galleryListContent: {
     paddingBottom: 16,
     paddingHorizontal: 0,
@@ -1188,90 +1080,14 @@ const styles = StyleSheet.create({
     color: '#E5E7EB',
     marginTop: 2,
   },
-  cardFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    marginTop: 12,
-    gap: 8,
-  },
-  metaTag: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  metaTagText: {
-    fontSize: 11,
-    fontWeight: '500',
-  },
-  badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-    gap: 4,
-  },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  modalContainer: {
-    flex: 1,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-  },
-  cancelText: {
-    fontSize: 16,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  saveText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  form: {
-    flex: 1,
-    padding: 16,
-  },
-  detailsScroll: {
-    flex: 1,
-  },
-  detailsScrollContent: {
+  detailsContent: {
     padding: 16,
     paddingBottom: 36,
   },
-  textArea: {
-    minHeight: 100,
-    textAlignVertical: 'top',
-  },
-  detailsTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  detailsTags: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 16,
-  },
-  detailsTag: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  detailsTagText: {
-    fontSize: 12,
+  detailsName: {
+    fontSize: 18,
     fontWeight: '600',
+    marginBottom: 8,
   },
   detailsSection: {
     marginBottom: 16,

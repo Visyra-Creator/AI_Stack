@@ -87,7 +87,12 @@ export default function ContentCreationScreen() {
 
   const loadCategories = useCallback(async () => {
     const data = await contentCreationCategoryStorage.getAll();
-    setCategories(data);
+    const sorted = [...data].sort((a, b) => {
+      if (a.toLowerCase() === 'other') return 1;
+      if (b.toLowerCase() === 'other') return -1;
+      return a.localeCompare(b);
+    });
+    setCategories(sorted);
   }, []);
 
   useEffect(() => {

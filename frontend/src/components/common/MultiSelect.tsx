@@ -6,8 +6,10 @@ import { useTheme } from '@/src/context/ThemeContext';
 interface MultiSelectProps {
   label: string;
   options: string[];
-  selected: string[];
-  onChange: (selected: string[]) => void;
+  selected?: string[];
+  selectedValues?: string[];
+  onChange?: (selected: string[]) => void;
+  onSelect?: (selected: string[]) => void;
   placeholder?: string;
 }
 
@@ -15,17 +17,25 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
   label,
   options,
   selected,
+  selectedValues,
   onChange,
+  onSelect,
   placeholder = 'Select options',
 }) => {
   const { colors } = useTheme();
   const [modalVisible, setModalVisible] = useState(false);
+  const currentSelected = selectedValues ?? selected ?? [];
+  const handleSelectionChange = onSelect ?? onChange;
 
   const toggleOption = (option: string) => {
-    if (selected.includes(option)) {
-      onChange(selected.filter(s => s !== option));
+    if (!handleSelectionChange) {
+      return;
+    }
+
+    if (currentSelected.includes(option)) {
+      handleSelectionChange(currentSelected.filter(s => s !== option));
     } else {
-      onChange([...selected, option]);
+      handleSelectionChange([...currentSelected, option]);
     }
   };
 
@@ -36,8 +46,8 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
         style={[styles.selector, { backgroundColor: colors.surface, borderColor: colors.border }]}
         onPress={() => setModalVisible(true)}
       >
-        <Text style={[styles.selectorText, { color: selected.length > 0 ? colors.text : colors.textSecondary }]}>
-          {selected.length > 0 ? selected.join(', ') : placeholder}
+        <Text style={[styles.selectorText, { color: currentSelected.length > 0 ? colors.text : colors.textSecondary }]}>
+          {currentSelected.length > 0 ? currentSelected.join(', ') : placeholder}
         </Text>
         <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
       </TouchableOpacity>
@@ -58,7 +68,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                   onPress={() => toggleOption(option)}
                 >
                   <Text style={[styles.optionText, { color: colors.text }]}>{option}</Text>
-                  {selected.includes(option) && (
+                  {currentSelected.includes(option) && (
                     <Ionicons name="checkmark-circle" size={22} color={colors.primary} />
                   )}
                 </TouchableOpacity>

@@ -16,6 +16,7 @@ const STORAGE_KEYS = {
   PROMPT_CATEGORIES: 'prompt_categories',
   TOOLS: 'tools',
   TUTORIALS: 'tutorials',
+  TUTORIAL_CATEGORIES: 'tutorial_categories',
   OPEN_SOURCE: 'open_source',
   OPEN_SOURCE_CATEGORIES: 'open_source_categories',
   LEAD_GENERATION: 'lead_generation',
@@ -25,6 +26,7 @@ const STORAGE_KEYS = {
   CONTENT_CREATION: 'content_creation',
   CONTENT_CREATION_CATEGORIES: 'content_creation_categories',
   WEBSITE: 'website',
+  WEBSITE_CATEGORIES: 'website_categories',
   REFERENCE: 'reference',
   MARKETING: 'marketing',
   MARKETING_CATEGORIES: 'marketing_categories',
@@ -114,6 +116,7 @@ export interface PromptItem {
   generatedImages?: string[];
   aiToolUsed: string;
   category: string;
+  categories?: string[];
   type: 'general' | 'personal';
   isFavorite?: boolean;
   createdAt: number;
@@ -127,6 +130,7 @@ export interface ToolItem {
   link: string;
   description: string;
   instructions: string;
+  categories?: string[];
   image?: string;
   images?: string[];
   isFavorite?: boolean;
@@ -141,6 +145,7 @@ export interface TutorialItem {
   description: string;
   instructions: string;
   videoLink?: string;
+  categories?: string[];
   files: string[];
   isFavorite?: boolean;
   createdAt: number;
@@ -154,7 +159,7 @@ export interface OpenSourceItem {
   description: string;
   instructions: string;
   links: { label: string; url: string }[];
-  category: string;
+  categories?: string[];
   images?: string[];
   files?: string[];
   isFavorite?: boolean;
@@ -170,7 +175,7 @@ export interface LeadGenerationItem {
   instructions: string;
   link: string;
   videoLink?: string;
-  category: string;
+  categories?: string[];
   isFavorite?: boolean;
   images?: string[];
   files?: string[];
@@ -217,7 +222,9 @@ export interface WebsiteItem {
   name: string;
   toolLink: string;
   description: string;
-  category: string;
+  categories?: string[];
+  pricingType?: 'free' | 'paid';
+  pricingDescription?: string;
   isFavorite?: boolean;
   createdAt: number;
   updatedAt?: number;
@@ -240,7 +247,7 @@ export interface MarketingItem {
   name: string;
   toolLink: string;
   description: string;
-  category: string;
+  categories?: string[];
   instructions: string;
   link: string;
   isFavorite?: boolean;
@@ -459,11 +466,24 @@ export const promptsCategoryStorage = {
 };
 
 // Tools
-export const toolsStorage = {
+export const toolStorage = {
   getAll: () => getItems<ToolItem>(STORAGE_KEYS.TOOLS),
   add: (item: Omit<ToolItem, 'id' | 'createdAt'>) => addItem<ToolItem>(STORAGE_KEYS.TOOLS, item),
   update: (id: string, updates: Partial<ToolItem>) => updateItem<ToolItem>(STORAGE_KEYS.TOOLS, id, updates),
   delete: (id: string) => deleteItem<ToolItem>(STORAGE_KEYS.TOOLS, id),
+};
+
+export const toolCategoryStorage = {
+  getAll: async (): Promise<string[]> => {
+    const categories = await getItems<string>(STORAGE_KEYS.TOOLS + '_CATEGORIES');
+    if (categories.length === 0) {
+      const defaultCategories = ['AI Tool', 'Productivity', 'Design', 'Development', 'Marketing', 'Other'];
+      await saveItems(STORAGE_KEYS.TOOLS + '_CATEGORIES', defaultCategories);
+      return defaultCategories;
+    }
+    return categories;
+  },
+  saveAll: (categories: string[]) => saveItems(STORAGE_KEYS.TOOLS + '_CATEGORIES', categories),
 };
 
 // Tutorials
@@ -472,6 +492,19 @@ export const tutorialsStorage = {
   add: (item: Omit<TutorialItem, 'id' | 'createdAt'>) => addItem<TutorialItem>(STORAGE_KEYS.TUTORIALS, item),
   update: (id: string, updates: Partial<TutorialItem>) => updateItem<TutorialItem>(STORAGE_KEYS.TUTORIALS, id, updates),
   delete: (id: string) => deleteItem<TutorialItem>(STORAGE_KEYS.TUTORIALS, id),
+};
+
+export const tutorialsCategoryStorage = {
+  getAll: async (): Promise<string[]> => {
+    const categories = await getItems<string>(STORAGE_KEYS.TUTORIAL_CATEGORIES);
+    if (categories.length === 0) {
+      const defaultCategories = ['Video Editing', 'Writing', 'AI Basics', 'Coding', 'Marketing', 'Other'];
+      await saveItems(STORAGE_KEYS.TUTORIAL_CATEGORIES, defaultCategories);
+      return defaultCategories;
+    }
+    return categories;
+  },
+  saveAll: (categories: string[]) => saveItems(STORAGE_KEYS.TUTORIAL_CATEGORIES, categories),
 };
 
 // Open Source

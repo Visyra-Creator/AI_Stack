@@ -30,6 +30,7 @@ import { Button } from '@/src/components/common/Button';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { openSourceStorage, openSourceCategoryStorage, OpenSourceItem } from '@/src/services/storage';
+import { MultiSelect } from '@/src/components/common/MultiSelect';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -54,9 +55,9 @@ export default function OpenSourceScreen() {
   const [selectedItem, setSelectedItem] = useState<OpenSourceItem | null>(null);
   const [editingItem, setEditingItem] = useState<OpenSourceItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [categories, setCategories] = useState<string[]>([]);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [categories, setCategories] = useState<string[]>([]);
   const [activeFilter, setActiveFilter] = useState('All');
   const [activeSort, setActiveSort] = useState<SortValue>('recent');
   const [viewMode, setViewMode] = useState<ViewMode>('normal');
@@ -72,9 +73,10 @@ export default function OpenSourceScreen() {
     description: '',
     instructions: '',
     links: [{ label: '', url: '' }] as { label: string; url: string }[],
+    category: '',
+    categories: [] as string[],
     images: [] as string[],
     files: [] as string[],
-    category: '',
   });
 
   const loadItems = useCallback(async () => {
@@ -84,7 +86,12 @@ export default function OpenSourceScreen() {
 
   const loadCategories = useCallback(async () => {
     const data = await openSourceCategoryStorage.getAll();
-    setCategories(data);
+    const sorted = [...data].sort((a, b) => {
+      if (a.toLowerCase() === 'other') return 1;
+      if (b.toLowerCase() === 'other') return -1;
+      return a.localeCompare(b);
+    });
+    setCategories(sorted);
   }, []);
 
   useEffect(() => {
@@ -98,129 +105,16 @@ export default function OpenSourceScreen() {
     setRefreshing(false);
   };
 
-  const normalizeCategory = (value: string) => value.trim();
-
-  const addCategory = async () => {
-    const value = normalizeCategory(newCategoryName);
-    if (!value) {
-      Alert.alert('Error', 'Category name cannot be empty');
-      return;
-    }
-
-    if (categories.some(category => category.toLowerCase() === value.toLowerCase())) {
-      Alert.alert('Error', 'Category already exists');
-      return;
-    }
-
-    const updatedCategories = [...categories, value];
-    await openSourceCategoryStorage.saveAll(updatedCategories);
-    setCategories(updatedCategories);
-    setNewCategoryName('');
-  };
-
-  const startEditCategory = (category: string) => {
-    setEditingCategory(category);
-    setEditingCategoryName(category);
-  };
-
-  const saveEditedCategory = async () => {
-    if (!editingCategory) return;
-
-    const value = normalizeCategory(editingCategoryName);
-    if (!value) {
-      Alert.alert('Error', 'Category name cannot be empty');
-      return;
-    }
-
-    if (
-      categories.some(
-        category =>
-          category.toLowerCase() === value.toLowerCase() &&
-          category.toLowerCase() !== editingCategory.toLowerCase(),
-      )
-    ) {
-      Alert.alert('Error', 'Category already exists');
-      return;
-    }
-
-    const updatedCategories = categories.map(category =>
-      category === editingCategory ? value : category,
-    );
-    await openSourceCategoryStorage.saveAll(updatedCategories);
-    setCategories(updatedCategories);
-
-    const allItems = await openSourceStorage.getAll();
-    const affectedItems = allItems.filter(item => item.category === editingCategory);
-    await Promise.all(
-      affectedItems.map(item =>
-        openSourceStorage.update(item.id, { category: value }),
-      ),
-    );
-
-    if (activeFilter === editingCategory) {
-      setActiveFilter(value);
-    }
-
-    if (formData.category === editingCategory) {
-      setFormData(prev => ({ ...prev, category: value }));
-    }
-
-    setEditingCategory(null);
-    setEditingCategoryName('');
-    await loadItems();
-  };
-
-  const deleteCategory = (categoryToDelete: string) => {
-    Alert.alert(
-      'Delete Category',
-      `Delete "${categoryToDelete}"? This removes it from existing projects too.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            const updatedCategories = categories.filter(category => category !== categoryToDelete);
-            await openSourceCategoryStorage.saveAll(updatedCategories);
-            setCategories(updatedCategories);
-
-            const allItems = await openSourceStorage.getAll();
-            const affectedItems = allItems.filter(item => item.category === categoryToDelete);
-            await Promise.all(
-              affectedItems.map(item =>
-                openSourceStorage.update(item.id, { category: '' }),
-              ),
-            );
-
-            if (activeFilter === categoryToDelete) {
-              setActiveFilter('All');
-            }
-
-            if (formData.category === categoryToDelete) {
-              setFormData(prev => ({ ...prev, category: '' }));
-            }
-
-            if (editingCategory === categoryToDelete) {
-              setEditingCategory(null);
-              setEditingCategoryName('');
-            }
-
-            await loadItems();
-          },
-        },
-      ],
-    );
-  };
-
   const resetForm = () => {
     setFormData({
       name: '',
       description: '',
       instructions: '',
       links: [{ label: '', url: '' }],
+      category: '',
+      categories: [],
       images: [],
       files: [],
-      category: '',
     });
     setEditingItem(null);
   };
@@ -237,9 +131,10 @@ export default function OpenSourceScreen() {
       description: item.description,
       instructions: item.instructions,
       links: item.links.length > 0 ? item.links : [{ label: '', url: '' }],
-      images: item.images ?? [],
-      files: item.files ?? [],
-      category: item.category,
+      category: item.categories?.[0] || '',
+      categories: item.categories || (item.category ? [item.category] : []),
+      images: item.images || [],
+      files: item.files || [],
     });
     setModalVisible(true);
   };
@@ -466,17 +361,20 @@ export default function OpenSourceScreen() {
   };
 
   const filteredItems = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+
     return items.filter(item => {
-      const matchesQuery =
-        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.category.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesSearch =
+        !query ||
+        item.name.toLowerCase().includes(query) ||
+        item.description.toLowerCase().includes(query) ||
+        item.instructions.toLowerCase().includes(query);
 
       const matchesFilter =
         activeFilter === 'All' ||
-        (activeFilter === 'Favorites' ? (item.isFavorite ?? false) : item.category === activeFilter);
+        (activeFilter === 'Favorites' ? (item.isFavorite ?? false) : (item.categories || (item.category ? [item.category] : [])).includes(activeFilter));
 
-      return matchesQuery && matchesFilter;
+      return matchesSearch && matchesFilter;
     });
   }, [items, searchQuery, activeFilter]);
 
@@ -485,7 +383,11 @@ export default function OpenSourceScreen() {
     if (activeSort === 'name') {
       sorted.sort((a, b) => a.name.localeCompare(b.name));
     } else if (activeSort === 'category') {
-      sorted.sort((a, b) => a.category.localeCompare(b.category));
+      sorted.sort((a, b) => {
+        const catA = a.categories?.[0] || a.category || '';
+        const catB = b.categories?.[0] || b.category || '';
+        return catA.localeCompare(catB);
+      });
     } else {
       sorted.sort((a, b) => b.createdAt - a.createdAt);
     }
@@ -510,11 +412,18 @@ export default function OpenSourceScreen() {
     return getImageUri(item.images[0]);
   };
 
+  const resetFilters = () => {
+    setSearchQuery('');
+    setActiveFilter('All');
+    setActiveSort('recent');
+    setViewMode('normal');
+  };
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        <TouchableOpacity onPress={() => router.replace('/')} style={styles.backButton}>
+          <Ionicons name="home-outline" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: colors.text }]}>Open Source</Text>
         <TouchableOpacity onPress={openAddModal} style={[styles.addButton, { backgroundColor: colors.primary }]}>
@@ -581,6 +490,12 @@ export default function OpenSourceScreen() {
               {viewMode === 'normal' ? 'Gallery' : 'List'}
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.favoriteFilterButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={resetFilters}
+          >
+            <Ionicons name="refresh-outline" size={16} color={colors.textSecondary} />
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -603,7 +518,7 @@ export default function OpenSourceScreen() {
             <Card
               key={item.id}
               title={item.name}
-              subtitle={getCardSubtitle(item)}
+              subtitle={item.description}
               subtitleLines={1}
               onPress={() => openDetailsModal(item)}
               onFavorite={() => toggleFavorite(item)}
@@ -612,25 +527,13 @@ export default function OpenSourceScreen() {
               onDelete={() => handleDelete(item)}
             >
               <View style={styles.cardFooter}>
-                {item.category && (
-                  <View style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
-                    <Text style={[styles.metaTagText, { color: colors.primary }]}>{item.category}</Text>
-                  </View>
-                )}
-                {item.links && item.links.length > 0 && (
-                  <View style={[styles.pricingBadge, { backgroundColor: colors.success + '20' }]}>
-                    <Text style={[styles.pricingText, { color: colors.success }]}>
-                      {item.links.length} link(s)
-                    </Text>
-                  </View>
-                )}
-                {item.images && item.images.length > 0 && (
-                  <View style={[styles.pricingBadge, { backgroundColor: colors.warning + '20' }]}>
-                    <Text style={[styles.pricingText, { color: colors.warning }]}>
-                      {item.images.length} image(s)
-                    </Text>
-                  </View>
-                )}
+                <View style={styles.metaTagsWrap}>
+                  {(item.categories || (item.category ? [item.category] : [])).map((tag, index) => (
+                    <View key={`${tag}-${index}`} style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
+                      <Text style={[styles.metaTagText, { color: colors.primary }]}>{tag}</Text>
+                    </View>
+                  ))}
+                </View>
               </View>
             </Card>
           ))}
@@ -709,93 +612,77 @@ export default function OpenSourceScreen() {
           </View>
 
           {selectedItem && (
-            <ScrollView
-              style={styles.detailsScroll}
-              contentContainerStyle={styles.detailsScrollContent}
-              showsVerticalScrollIndicator
-            >
-              <Text style={[styles.detailsTitle, { color: colors.text }]}>{selectedItem.name}</Text>
+            <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
+              <View style={styles.detailsContent}>
+                <Text style={[styles.detailsName, { color: colors.text }]}>{selectedItem.name}</Text>
 
-              {selectedItem.category && (
-                <View style={styles.detailsTags}>
-                  <View style={[styles.detailsTag, { backgroundColor: colors.primary + '20' }]}>
-                    <Text style={[styles.detailsTagText, { color: colors.primary }]}>{selectedItem.category}</Text>
-                  </View>
-                </View>
-              )}
-
-              {!!selectedItem.description?.trim() && (
-                <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Description</Text>
-                  {renderLinkedText(selectedItem.description)}
-                </View>
-              )}
-
-              {!!selectedItem.instructions?.trim() && (
-                <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Instructions</Text>
-                  {renderLinkedText(selectedItem.instructions)}
-                </View>
-              )}
-
-              {!!selectedItem.images?.length && (
-                <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Images</Text>
-                  <Text style={[styles.detailsImageHint, { color: colors.textSecondary }]}>Double tap an image to view full screen</Text>
-                  <View style={styles.detailsImageGrid}>
-                    {selectedItem.images.map((image, index) => {
-                      const uri = getImageUri(image);
-                      if (!uri) return null;
-                      return (
-                        <DoubleTapImage
-                          key={`${image}-${index}`}
-                          uri={uri}
-                          style={[styles.detailsImage, { backgroundColor: colors.surface }]}
-                          resizeMode="cover"
-                        />
-                      );
-                    })}
-                  </View>
-                </View>
-              )}
-
-              {!!selectedItem.files?.length && (
-                <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Documents</Text>
-                  {selectedItem.files.map((file, index) => (
-                    <TouchableOpacity
-                      key={`${file}-${index}`}
-                      style={[styles.detailsFileRow, { borderColor: colors.border }]}
-                      onPress={() => openFile(file)}
-                    >
-                      <Ionicons name="document-text-outline" size={16} color={colors.primary} />
-                      <Text style={[styles.detailsFileName, { color: colors.text }]} numberOfLines={1}>
-                        {getFileName(file)}
-                      </Text>
-                      <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
-                    </TouchableOpacity>
+                <View style={styles.metaTagsWrap}>
+                  {(selectedItem.categories || (selectedItem.category ? [selectedItem.category] : [])).map((tag, index) => (
+                    <View key={`${tag}-${index}`} style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
+                      <Text style={[styles.metaTagText, { color: colors.primary }]}>{tag}</Text>
+                    </View>
                   ))}
                 </View>
-              )}
 
-              {selectedItem.links && selectedItem.links.length > 0 && (
-                <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Links</Text>
-                  {selectedItem.links.map((link, index) => (
-                    <TouchableOpacity
-                      key={`${link.url}-${index}`}
-                      style={[styles.detailsFileRow, { borderColor: colors.border }]}
-                      onPress={() => openExternalLink(link.url)}
-                    >
-                      <Ionicons name="link-outline" size={16} color={colors.primary} />
-                      <Text style={[styles.detailsFileName, { color: colors.text }]} numberOfLines={1}>
-                        {link.label || link.url}
-                      </Text>
-                      <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
+                {selectedItem.links && selectedItem.links.length > 0 && (
+                  <View style={styles.detailsSection}>
+                    <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Links</Text>
+                    {selectedItem.links.map((link, index) => (
+                      <TouchableOpacity
+                        key={`${link.url}-${index}`}
+                        style={[styles.detailsFileRow, { borderColor: colors.border }]}
+                        onPress={() => openExternalLink(link.url)}
+                      >
+                        <Ionicons name="link-outline" size={16} color={colors.primary} />
+                        <Text style={[styles.detailsFileName, { color: colors.text }]} numberOfLines={1}>
+                          {link.label || link.url}
+                        </Text>
+                        <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+
+                {!!selectedItem.images?.length && (
+                  <View style={styles.detailsSection}>
+                    <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Images</Text>
+                    <Text style={[styles.detailsImageHint, { color: colors.textSecondary }]}>Double tap an image to view full screen</Text>
+                    <View style={styles.detailsImageGrid}>
+                      {selectedItem.images.map((image, index) => {
+                        const uri = getImageUri(image);
+                        if (!uri) return null;
+                        return (
+                          <DoubleTapImage
+                            key={`${image}-${index}`}
+                            uri={uri}
+                            style={[styles.detailsImage, { backgroundColor: colors.surface }]}
+                            resizeMode="cover"
+                          />
+                        );
+                      })}
+                    </View>
+                  </View>
+                )}
+
+                {!!selectedItem.files?.length && (
+                  <View style={styles.detailsSection}>
+                    <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Documents</Text>
+                    {selectedItem.files.map((file, index) => (
+                      <TouchableOpacity
+                        key={`${file}-${index}`}
+                        style={[styles.detailsFileRow, { borderColor: colors.border }]}
+                        onPress={() => openFile(file)}
+                      >
+                        <Ionicons name="document-text-outline" size={16} color={colors.primary} />
+                        <Text style={[styles.detailsFileName, { color: colors.text }]} numberOfLines={1}>
+                          {getFileName(file)}
+                        </Text>
+                        <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
             </ScrollView>
           )}
         </SafeAreaView>
@@ -839,6 +726,12 @@ export default function OpenSourceScreen() {
               options={categories}
               value={formData.category}
               onChange={(category) => setFormData({ ...formData, category })}
+            />
+            <MultiSelect
+              label="Categories"
+              options={categories}
+              selectedValues={formData.categories}
+              onSelect={(categories) => setFormData({ ...formData, categories })}
             />
             <TouchableOpacity
               style={[styles.manageCategoriesButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
@@ -954,7 +847,12 @@ export default function OpenSourceScreen() {
                   )}
                 </View>
               ))}
-              <Button title="Add Link" onPress={addLink} variant="outline" style={styles.addLinkButton} />
+              <Button
+                title="Add Link"
+                onPress={addLink}
+                variant="outline"
+                style={styles.addLinkButton}
+              />
             </View>
 
             <View style={styles.bottomPadding} />
@@ -962,120 +860,120 @@ export default function OpenSourceScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      <Modal visible={filterModalVisible} transparent animationType="fade">
-        <View style={styles.overlay}>
-          <View style={[styles.optionSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[styles.optionTitle, { color: colors.text }]}>Filter by Category</Text>
-            {filterOptions.map(option => (
-              <TouchableOpacity
-                key={option}
-                style={styles.optionRow}
-                onPress={() => {
-                  setActiveFilter(option);
-                  setFilterModalVisible(false);
-                }}
-              >
-                <Text style={[styles.optionText, { color: colors.text }]}>{option}</Text>
-                {activeFilter === option && <Ionicons name="checkmark" size={18} color={colors.primary} />}
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity onPress={() => setFilterModalVisible(false)} style={styles.optionClose}>
-              <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={sortModalVisible} transparent animationType="fade">
-        <View style={styles.overlay}>
-          <View style={[styles.optionSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[styles.optionTitle, { color: colors.text }]}>Sort by</Text>
-            {SORT_OPTIONS.map(option => (
-              <TouchableOpacity
-                key={option.value}
-                style={styles.optionRow}
-                onPress={() => {
-                  setActiveSort(option.value);
-                  setSortModalVisible(false);
-                }}
-              >
-                <Text style={[styles.optionText, { color: colors.text }]}>{option.label}</Text>
-                {activeSort === option.value && <Ionicons name="checkmark" size={18} color={colors.primary} />}
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity onPress={() => setSortModalVisible(false)} style={styles.optionClose}>
-              <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={categoriesModalVisible} transparent animationType="fade">
-        <View style={styles.overlay}>
-          <View style={[styles.optionSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[styles.optionTitle, { color: colors.text }]}>Manage Categories</Text>
-
-            <View style={[styles.categoryInputRow, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-              <TextInput
-                value={newCategoryName}
-                onChangeText={setNewCategoryName}
-                placeholder="New category"
-                placeholderTextColor={colors.textSecondary}
-                style={[styles.categoryInput, { color: colors.text }]}
-              />
-              <TouchableOpacity
-                style={[styles.categoryActionButton, { backgroundColor: colors.primary }]}
-                onPress={addCategory}
-              >
-                <Ionicons name="add" size={16} color="#FFFFFF" />
+        <Modal visible={filterModalVisible} transparent animationType="fade">
+          <View style={styles.overlay}>
+            <View style={[styles.optionSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.optionTitle, { color: colors.text }]}>Filter by Category</Text>
+              {filterOptions.map(option => (
+                <TouchableOpacity
+                  key={option}
+                  style={styles.optionRow}
+                  onPress={() => {
+                    setActiveFilter(option);
+                    setFilterModalVisible(false);
+                  }}
+                >
+                  <Text style={[styles.optionText, { color: colors.text }]}>{option}</Text>
+                  {activeFilter === option && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity onPress={() => setFilterModalVisible(false)} style={styles.optionClose}>
+                <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Close</Text>
               </TouchableOpacity>
             </View>
-
-            <ScrollView style={styles.categoriesList}>
-              {categories.map(category => (
-                <View key={category} style={[styles.categoryRow, { borderBottomColor: colors.border }]}>
-                  {editingCategory === category ? (
-                    <TextInput
-                      value={editingCategoryName}
-                      onChangeText={setEditingCategoryName}
-                      style={[styles.categoryEditInput, { color: colors.text, borderColor: colors.border }]}
-                    />
-                  ) : (
-                    <Text style={[styles.optionText, { color: colors.text }]}>{category}</Text>
-                  )}
-
-                  <View style={styles.categoryActions}>
-                    {editingCategory === category ? (
-                      <TouchableOpacity onPress={saveEditedCategory} style={styles.categoryIconButton}>
-                        <Ionicons name="checkmark" size={18} color={colors.success} />
-                      </TouchableOpacity>
-                    ) : (
-                      <TouchableOpacity onPress={() => startEditCategory(category)} style={styles.categoryIconButton}>
-                        <Ionicons name="create-outline" size={17} color={colors.textSecondary} />
-                      </TouchableOpacity>
-                    )}
-                    <TouchableOpacity onPress={() => deleteCategory(category)} style={styles.categoryIconButton}>
-                      <Ionicons name="trash-outline" size={17} color={colors.danger} />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))}
-            </ScrollView>
-
-            <TouchableOpacity
-              onPress={() => {
-                setCategoriesModalVisible(false);
-                setEditingCategory(null);
-                setEditingCategoryName('');
-                setNewCategoryName('');
-              }}
-              style={styles.optionClose}
-            >
-              <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Done</Text>
-            </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
+        </Modal>
+
+        <Modal visible={sortModalVisible} transparent animationType="fade">
+          <View style={styles.overlay}>
+            <View style={[styles.optionSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.optionTitle, { color: colors.text }]}>Sort by</Text>
+              {SORT_OPTIONS.map(option => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={styles.optionRow}
+                  onPress={() => {
+                    setActiveSort(option.value);
+                    setSortModalVisible(false);
+                  }}
+                >
+                  <Text style={[styles.optionText, { color: colors.text }]}>{option.label}</Text>
+                  {activeSort === option.value && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity onPress={() => setSortModalVisible(false)} style={styles.optionClose}>
+                <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={categoriesModalVisible} transparent animationType="fade">
+          <View style={styles.overlay}>
+            <View style={[styles.optionSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.optionTitle, { color: colors.text }]}>Manage Categories</Text>
+
+              <View style={[styles.categoryInputRow, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+                <TextInput
+                  value={newCategoryName}
+                  onChangeText={setNewCategoryName}
+                  placeholder="New category"
+                  placeholderTextColor={colors.textSecondary}
+                  style={[styles.categoryInput, { color: colors.text }]}
+                />
+                <TouchableOpacity
+                  style={[styles.categoryActionButton, { backgroundColor: colors.primary }]}
+                  onPress={addCategory}
+                >
+                  <Ionicons name="add" size={16} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={styles.categoriesList}>
+                {categories.map(category => (
+                  <View key={category} style={[styles.categoryRow, { borderBottomColor: colors.border }]}>
+                    {editingCategory === category ? (
+                      <TextInput
+                        value={editingCategoryName}
+                        onChangeText={setEditingCategoryName}
+                        style={[styles.categoryEditInput, { color: colors.text, borderColor: colors.border }]}
+                      />
+                    ) : (
+                      <Text style={[styles.optionText, { color: colors.text }]}>{category}</Text>
+                    )}
+
+                    <View style={styles.categoryActions}>
+                      {editingCategory === category ? (
+                        <TouchableOpacity onPress={saveEditedCategory} style={styles.categoryIconButton}>
+                          <Ionicons name="checkmark" size={18} color={colors.success} />
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity onPress={() => startEditCategory(category)} style={styles.categoryIconButton}>
+                          <Ionicons name="create-outline" size={17} color={colors.textSecondary} />
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity onPress={() => deleteCategory(category)} style={styles.categoryIconButton}>
+                        <Ionicons name="trash-outline" size={17} color={colors.danger} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+              </ScrollView>
+
+              <TouchableOpacity
+                onPress={() => {
+                  setCategoriesModalVisible(false);
+                  setEditingCategory(null);
+                  setEditingCategoryName('');
+                  setNewCategoryName('');
+                }}
+                style={styles.optionClose}
+              >
+                <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
     </SafeAreaView>
   );
 }
@@ -1155,6 +1053,27 @@ const styles = StyleSheet.create({
   list: {
     flex: 1,
   },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginTop: 12,
+  },
+  metaTagsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 4,
+  },
+  metaTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  metaTagText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
   galleryListContent: {
     paddingBottom: 16,
     paddingHorizontal: 0,
@@ -1225,31 +1144,6 @@ const styles = StyleSheet.create({
     color: '#E5E7EB',
     marginTop: 2,
   },
-  cardFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    marginTop: 12,
-    gap: 8,
-  },
-  metaTag: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  metaTagText: {
-    fontSize: 11,
-    fontWeight: '500',
-  },
-  pricingBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  pricingText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
   modalContainer: {
     flex: 1,
   },
@@ -1283,11 +1177,15 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 36,
   },
+  detailsContent: {
+    padding: 16,
+    paddingBottom: 40,
+  },
   textArea: {
     minHeight: 100,
     textAlignVertical: 'top',
   },
-  detailsTitle: {
+  detailsName: {
     fontSize: 22,
     fontWeight: '700',
     marginBottom: 12,

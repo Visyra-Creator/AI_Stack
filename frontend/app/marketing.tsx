@@ -28,6 +28,7 @@ import { Select } from '@/src/components/common/Select';
 import { Button } from '@/src/components/common/Button';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { marketingStorage, marketingCategoryStorage, MarketingItem } from '@/src/services/storage';
+import { MultiSelect } from '@/src/components/common/MultiSelect';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -50,6 +51,7 @@ export default function MarketingScreen() {
   const [editingItem, setEditingItem] = useState<MarketingItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
   const [activeSort, setActiveSort] = useState<SortValue>('recent');
@@ -65,7 +67,7 @@ export default function MarketingScreen() {
     name: '',
     toolLink: '',
     description: '',
-    category: '',
+    categories: [] as string[],
     instructions: '',
     link: '',
     image: undefined as string | undefined,
@@ -81,7 +83,12 @@ export default function MarketingScreen() {
 
   const loadCategories = useCallback(async () => {
     const data = await marketingCategoryStorage.getAll();
-    setCategories(data);
+    const sorted = [...data].sort((a, b) => {
+      if (a.toLowerCase() === 'other') return 1;
+      if (b.toLowerCase() === 'other') return -1;
+      return a.localeCompare(b);
+    });
+    setCategories(sorted);
   }, []);
 
   useEffect(() => {
@@ -95,120 +102,12 @@ export default function MarketingScreen() {
     setRefreshing(false);
   };
 
-  const normalizeCategory = (value: string) => value.trim();
-
-  const addCategory = async () => {
-    const value = normalizeCategory(newCategoryName);
-    if (!value) {
-      Alert.alert('Error', 'Category name cannot be empty');
-      return;
-    }
-
-    if (categories.some(category => category.toLowerCase() === value.toLowerCase())) {
-      Alert.alert('Error', 'Category already exists');
-      return;
-    }
-
-    const updatedCategories = [...categories, value];
-    await marketingCategoryStorage.saveAll(updatedCategories);
-    setCategories(updatedCategories);
-    setNewCategoryName('');
-  };
-
-  const startEditCategory = (category: string) => {
-    setEditingCategory(category);
-    setEditingCategoryName(category);
-  };
-
-  const saveEditedCategory = async () => {
-    if (!editingCategory) return;
-
-    const value = normalizeCategory(editingCategoryName);
-    if (!value) {
-      Alert.alert('Error', 'Category name cannot be empty');
-      return;
-    }
-
-    if (
-      categories.some(
-        category =>
-          category.toLowerCase() === value.toLowerCase() &&
-          category.toLowerCase() !== editingCategory.toLowerCase(),
-      )
-    ) {
-      Alert.alert('Error', 'Category already exists');
-      return;
-    }
-
-    const updatedCategories = categories.map(category =>
-      category === editingCategory ? value : category,
-    );
-    await marketingCategoryStorage.saveAll(updatedCategories);
-    setCategories(updatedCategories);
-
-    const allItems = await marketingStorage.getAll();
-    const affectedItems = allItems.filter(item => item.category === editingCategory);
-    await Promise.all(
-      affectedItems.map(item => marketingStorage.update(item.id, { category: value })),
-    );
-
-    if (activeFilter === editingCategory) {
-      setActiveFilter(value);
-    }
-    if (formData.category === editingCategory) {
-      setFormData(prev => ({ ...prev, category: value }));
-    }
-
-    setEditingCategory(null);
-    setEditingCategoryName('');
-    await loadItems();
-  };
-
-  const deleteCategory = (categoryToDelete: string) => {
-    Alert.alert(
-      'Delete Category',
-      `Delete "${categoryToDelete}"? This removes it from existing tools too.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            const updatedCategories = categories.filter(category => category !== categoryToDelete);
-            await marketingCategoryStorage.saveAll(updatedCategories);
-            setCategories(updatedCategories);
-
-            const allItems = await marketingStorage.getAll();
-            const affectedItems = allItems.filter(item => item.category === categoryToDelete);
-            await Promise.all(
-              affectedItems.map(item => marketingStorage.update(item.id, { category: '' })),
-            );
-
-            if (activeFilter === categoryToDelete) {
-              setActiveFilter('All');
-            }
-            if (formData.category === categoryToDelete) {
-              setFormData(prev => ({ ...prev, category: '' }));
-            }
-
-            if (editingCategory === categoryToDelete) {
-              setEditingCategory(null);
-              setEditingCategoryName('');
-            }
-
-            await loadItems();
-          },
-        },
-      ],
-    );
-  };
-
   const resetForm = () => {
     setFormData({
       name: '',
       toolLink: '',
       description: '',
-      category: '',
+      categories: [],
       instructions: '',
       link: '',
       image: undefined,
@@ -230,13 +129,13 @@ export default function MarketingScreen() {
       name: item.name,
       toolLink: item.toolLink,
       description: item.description,
-      category: item.category,
+      categories: item.categories || (item.category ? [item.category] : []),
       instructions: item.instructions,
       link: item.link,
       image: item.image,
       file: item.file,
-      images: item.images || (item.image ? [item.image] : []),
-      files: item.files || (item.file ? [item.file] : []),
+      images: item.images || [],
+      files: item.files || [],
     });
     setModalVisible(true);
   };
@@ -411,13 +310,12 @@ export default function MarketingScreen() {
         item.name.toLowerCase().includes(query) ||
         item.description.toLowerCase().includes(query) ||
         item.instructions.toLowerCase().includes(query) ||
-        item.toolLink.toLowerCase().includes(query) ||
-        item.link.toLowerCase().includes(query) ||
-        item.category.toLowerCase().includes(query);
+        item.toolLink.toLowerCase().includes(query);
 
       const matchesFilter =
         activeFilter === 'All' ||
-        (activeFilter === 'Favorites' ? (item.isFavorite ?? false) : item.category === activeFilter);
+        (activeFilter === 'Favorites' ? (item.isFavorite ?? false) : (item.categories || (item.category ? [item.category] : [])).includes(activeFilter));
+
       return matchesSearch && matchesFilter;
     });
   }, [items, searchQuery, activeFilter]);
@@ -445,11 +343,18 @@ export default function MarketingScreen() {
     setActiveFilter(prev => (prev === 'Favorites' ? 'All' : 'Favorites'));
   };
 
+  const resetFilters = () => {
+    setSearchQuery('');
+    setActiveFilter('All');
+    setActiveSort('recent');
+    setViewMode('normal');
+  };
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        <TouchableOpacity onPress={() => router.replace('/')} style={styles.backButton}>
+          <Ionicons name="home-outline" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: colors.text }]}>Marketing</Text>
         <TouchableOpacity onPress={openAddModal} style={[styles.addButton, { backgroundColor: colors.primary }]}>
@@ -460,9 +365,9 @@ export default function MarketingScreen() {
       <View style={styles.searchContainer}>
         <View style={styles.searchRow}>
           <View style={[styles.searchBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Ionicons name="search" size={18} color={colors.textSecondary} />
+            <Ionicons name="search" size={20} color={colors.textSecondary} />
             <TextInput
-              placeholder="Search tools..."
+              placeholder="Search marketing..."
               value={searchQuery}
               onChangeText={setSearchQuery}
               style={[styles.searchInput, { color: colors.text }]}
@@ -507,11 +412,16 @@ export default function MarketingScreen() {
             style={[styles.controlButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
             onPress={() => setViewMode(prev => (prev === 'normal' ? 'gallery' : 'normal'))}
           >
-            <Ionicons
-              name={viewMode === 'normal' ? 'grid-outline' : 'list-outline'}
-              size={16}
-              color={colors.textSecondary}
-            />
+            <Ionicons name={viewMode === 'normal' ? 'grid-outline' : 'list-outline'} size={16} color={colors.textSecondary} />
+            <Text style={[styles.controlButtonText, { color: colors.text }]} numberOfLines={1}>
+              {viewMode === 'normal' ? 'Gallery' : 'List'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.favoriteFilterButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={resetFilters}
+          >
+            <Ionicons name="refresh-outline" size={16} color={colors.textSecondary} />
           </TouchableOpacity>
         </View>
       </View>
@@ -592,34 +502,21 @@ export default function MarketingScreen() {
               key={item.id}
               title={item.name}
               subtitle={item.description}
-              tags={item.category ? [item.category] : []}
+              subtitleLines={1}
+              onPress={() => openDetailsModal(item)}
               onFavorite={() => toggleFavorite(item)}
               isFavorite={item.isFavorite ?? false}
               onEdit={() => openEditModal(item)}
               onDelete={() => handleDelete(item)}
             >
-              {getImageUri(getFirstImage(item)) && (
-                <Image source={{ uri: getImageUri(getFirstImage(item)) as string }} style={styles.cardImage} resizeMode="cover" />
-              )}
               <View style={styles.cardFooter}>
-                {item.toolLink && (
-                  <View style={[styles.badge, { backgroundColor: colors.primary + '20' }]}>
-                    <Ionicons name="link" size={14} color={colors.primary} />
-                    <Text style={[styles.badgeText, { color: colors.primary }]}>Tool</Text>
-                  </View>
-                )}
-                {item.file && (
-                  <View style={[styles.badge, { backgroundColor: colors.success + '20' }]}>
-                    <Ionicons name="document" size={14} color={colors.success} />
-                    <Text style={[styles.badgeText, { color: colors.success }]}>File</Text>
-                  </View>
-                )}
-                {item.image && (
-                  <View style={[styles.badge, { backgroundColor: colors.warning + '20' }]}>
-                    <Ionicons name="image-outline" size={14} color={colors.warning} />
-                    <Text style={[styles.badgeText, { color: colors.warning }]}>Image</Text>
-                  </View>
-                )}
+                <View style={styles.metaTagsWrap}>
+                  {(item.categories || (item.category ? [item.category] : [])).map((tag, index) => (
+                    <View key={`${tag}-${index}`} style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
+                      <Text style={[styles.metaTagText, { color: colors.primary }]}>{tag}</Text>
+                    </View>
+                  ))}
+                </View>
               </View>
             </Card>
           ))}
@@ -730,23 +627,22 @@ export default function MarketingScreen() {
             </TouchableOpacity>
             <FormInput
               label="Instructions"
-              placeholder="How to use for marketing..."
+              placeholder="How to use this resource..."
               value={formData.instructions}
               onChangeText={(text) => setFormData({ ...formData, instructions: text })}
               multiline
-              numberOfLines={4}
+              numberOfLines={5}
               style={styles.textArea}
             />
-            <FormInput
-              label="Additional Link"
-              placeholder="YouTube, resource link..."
-              value={formData.link}
-              onChangeText={(text) => setFormData({ ...formData, link: text })}
-              keyboardType="url"
-              autoCapitalize="none"
+
+            <MultiSelect
+              label="Categories"
+              options={categories}
+              selectedValues={formData.categories}
+              onSelect={(categories) => setFormData({ ...formData, categories })}
             />
 
-            <View style={styles.uploadSection}>
+            <View style={styles.imageSection}>
               <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>Upload Image</Text>
               <TouchableOpacity
                 style={[styles.uploadButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
@@ -1050,17 +946,20 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 12,
   },
-  badge: {
+  metaTagsWrap: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 4,
+  },
+  metaTag: {
+    paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
-    gap: 4,
   },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: '500',
+  metaTagText: {
+    fontSize: 11,
+    fontWeight: '600',
   },
   modalContainer: {
     flex: 1,

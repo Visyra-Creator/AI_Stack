@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -21,12 +21,16 @@ import { useTheme } from '@/src/context/ThemeContext';
 import { FormInput } from '@/src/components/common/FormInput';
 import { Select } from '@/src/components/common/Select';
 import { EmptyState } from '@/src/components/common/EmptyState';
-import { websiteStorage, WebsiteItem, websiteCategoryStorage } from '@/src/services/storage';
+import { websiteStorage, websiteCategoryStorage, WebsiteItem } from '@/src/services/storage';
+import { MultiSelect } from '@/src/components/common/MultiSelect';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
   { label: 'Name', value: 'name' },
 ] as const;
+
+const PRICING_OPTIONS = ['free', 'paid'] as const;
+const PRICING_FILTER_OPTIONS = ['All', 'Free', 'Paid'] as const;
 
 type SortValue = (typeof SORT_OPTIONS)[number]['value'];
 
@@ -34,6 +38,7 @@ const TABLE_BASE_WIDTH = {
   actions: 148,
   name: 220,
   category: 140,
+  pricing: 100,
   link: 270,
   description: 270,
 };
@@ -41,6 +46,7 @@ const TABLE_BASE_WIDTH = {
 const TABLE_FLEX_WIDTH =
   TABLE_BASE_WIDTH.name +
   TABLE_BASE_WIDTH.category +
+  TABLE_BASE_WIDTH.pricing +
   TABLE_BASE_WIDTH.link +
   TABLE_BASE_WIDTH.description;
 
@@ -62,6 +68,7 @@ export default function WebsiteScreen() {
     actions: TABLE_BASE_WIDTH.actions,
     name: Math.round(TABLE_BASE_WIDTH.name * widthScale),
     category: Math.round(TABLE_BASE_WIDTH.category * widthScale),
+    pricing: Math.round(TABLE_BASE_WIDTH.pricing * widthScale),
     link: Math.round(TABLE_BASE_WIDTH.link * widthScale),
     description: Math.round(TABLE_BASE_WIDTH.description * widthScale),
   };
@@ -79,26 +86,29 @@ export default function WebsiteScreen() {
   const [selectedItem, setSelectedItem] = useState<WebsiteItem | null>(null);
   const [editingItem, setEditingItem] = useState<WebsiteItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  
+  const [categories, setCategories] = useState<string[]>([]);
+
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterCategory, setFilterCategory] = useState('All');
+  const [activeFilter, setActiveFilter] = useState('All');
   const [activeSort, setActiveSort] = useState<SortValue>('recent');
+  const [pricingFilter, setPricingFilter] = useState<(typeof PRICING_FILTER_OPTIONS)[number]>('All');
 
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [sortModalVisible, setSortModalVisible] = useState(false);
+  const [pricingModalVisible, setPricingModalVisible] = useState(false);
+  const [categoriesModalVisible, setCategoriesModalVisible] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState('');
 
   const [formData, setFormData] = useState({
     name: '',
     toolLink: '',
     description: '',
-    category: '',
+    categories: [] as string[],
+    pricingType: 'free' as 'free' | 'paid',
+    pricingDescription: '',
   });
-
-  const [categories, setCategories] = useState<string[]>([]);
-  const [categoriesModalVisible, setCategoriesModalVisible] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState('');
-  const [editingCategory, setEditingCategory] = useState<string | null>(null);
-  const [editingCategoryName, setEditingCategoryName] = useState('');
 
   const loadItems = useCallback(async () => {
     const data = await websiteStorage.getAll();
@@ -107,7 +117,12 @@ export default function WebsiteScreen() {
 
   const loadCategories = useCallback(async () => {
     const data = await websiteCategoryStorage.getAll();
-    setCategories(data);
+    const sorted = [...data].sort((a, b) => {
+      if (a.toLowerCase() === 'other') return 1;
+      if (b.toLowerCase() === 'other') return -1;
+      return a.localeCompare(b);
+    });
+    setCategories(sorted);
   }, []);
 
   useEffect(() => {
@@ -121,132 +136,14 @@ export default function WebsiteScreen() {
     setRefreshing(false);
   };
 
-  const normalizeCategory = (value: string) => value.trim();
-
-  const addCategory = async () => {
-    const value = normalizeCategory(newCategoryName);
-    if (!value) {
-      Alert.alert('Error', 'Category name cannot be empty');
-      return;
-    }
-
-    if (categories.some(category => category.toLowerCase() === value.toLowerCase())) {
-      Alert.alert('Error', 'Category already exists');
-      return;
-    }
-
-    const updatedCategories = [...categories, value];
-    await websiteCategoryStorage.saveAll(updatedCategories);
-    setCategories(updatedCategories);
-    setNewCategoryName('');
-  };
-
-  const startEditCategory = (category: string) => {
-    setEditingCategory(category);
-    setEditingCategoryName(category);
-  };
-
-  const saveEditedCategory = async () => {
-    if (!editingCategory) return;
-
-    const value = normalizeCategory(editingCategoryName);
-    if (!value) {
-      Alert.alert('Error', 'Category name cannot be empty');
-      return;
-    }
-
-    if (
-      categories.some(
-        category =>
-          category.toLowerCase() === value.toLowerCase() &&
-          category.toLowerCase() !== editingCategory.toLowerCase(),
-      )
-    ) {
-      Alert.alert('Error', 'Category already exists');
-      return;
-    }
-
-    const updatedCategories = categories.map(category =>
-      category === editingCategory ? value : category,
-    );
-    await websiteCategoryStorage.saveAll(updatedCategories);
-    setCategories(updatedCategories);
-
-    const allItems = await websiteStorage.getAll();
-    const affectedItems = allItems.filter(item => item.category === editingCategory);
-    await Promise.all(
-      affectedItems.map(item =>
-        websiteStorage.update(item.id, {
-          category: value,
-        }),
-      ),
-    );
-
-    if (filterCategory === editingCategory) {
-      setFilterCategory(value);
-    }
-
-    setFormData(prev => ({
-      ...prev,
-      category: prev.category === editingCategory ? value : prev.category,
-    }));
-
-    setEditingCategory(null);
-    setEditingCategoryName('');
-    await loadItems();
-  };
-
-  const deleteCategory = (categoryToDelete: string) => {
-    Alert.alert(
-      'Delete Category',
-      `Delete "${categoryToDelete}"? This removes it from existing websites too.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            const updatedCategories = categories.filter(category => category !== categoryToDelete);
-            await websiteCategoryStorage.saveAll(updatedCategories);
-            setCategories(updatedCategories);
-
-            const allItems = await websiteStorage.getAll();
-            const affectedItems = allItems.filter(item => item.category === categoryToDelete);
-            await Promise.all(
-              affectedItems.map(item =>
-                websiteStorage.update(item.id, {
-                  category: '',
-                }),
-              ),
-            );
-
-            if (filterCategory === categoryToDelete) {
-              setFilterCategory('All');
-            }
-
-            setFormData(prev => ({
-              ...prev,
-              category: prev.category === categoryToDelete ? '' : prev.category,
-            }));
-
-            if (editingCategory === categoryToDelete) {
-              setEditingCategory(null);
-              setEditingCategoryName('');
-            }
-
-            await loadItems();
-          },
-        },
-      ],
-    );
-  };
-
   const resetForm = () => {
     setFormData({
       name: '',
       toolLink: '',
       description: '',
-      category: '',
+      categories: [],
+      pricingType: 'free',
+      pricingDescription: '',
     });
     setEditingItem(null);
   };
@@ -262,7 +159,9 @@ export default function WebsiteScreen() {
       name: item.name,
       toolLink: item.toolLink,
       description: item.description,
-      category: item.category,
+      categories: item.categories || (item.category ? [item.category] : []),
+      pricingType: item.pricingType || 'free',
+      pricingDescription: item.pricingDescription || '',
     });
     setModalVisible(true);
   };
@@ -278,10 +177,16 @@ export default function WebsiteScreen() {
       return;
     }
 
+    const payload = {
+      ...formData,
+      pricingDescription:
+        formData.pricingType === 'paid' ? formData.pricingDescription.trim() : '',
+    };
+
     if (editingItem) {
-      await websiteStorage.update(editingItem.id, formData);
+      await websiteStorage.update(editingItem.id, payload);
     } else {
-      await websiteStorage.add(formData);
+      await websiteStorage.add(payload);
     }
 
     await loadItems();
@@ -340,17 +245,151 @@ export default function WebsiteScreen() {
     }
   };
 
-  const filteredItems = items.filter(item => {
-    const matchesQuery =
-      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (item.category && item.category.toLowerCase().includes(searchQuery.toLowerCase()));
-    
-    const matchesFilter =
-      filterCategory === 'All' ||
-      (filterCategory === 'Favorites' ? (item.isFavorite ?? false) : item.category === filterCategory);
+  const normalizeCategory = (value: string) => value.trim();
 
-    return matchesQuery && matchesFilter;
-  });
+  const addCategory = async () => {
+    const value = normalizeCategory(newCategoryName);
+    if (!value) {
+      Alert.alert('Error', 'Category name cannot be empty');
+      return;
+    }
+
+    if (categories.some(category => category.toLowerCase() === value.toLowerCase())) {
+      Alert.alert('Error', 'Category already exists');
+      return;
+    }
+
+    const updatedCategories = [...categories, value];
+    await websiteCategoryStorage.saveAll(updatedCategories);
+    setCategories(updatedCategories);
+    setNewCategoryName('');
+  };
+
+  const startEditCategory = (category: string) => {
+    setEditingCategory(category);
+    setEditingCategoryName(category);
+  };
+
+  const saveEditedCategory = async () => {
+    if (!editingCategory) return;
+
+    const value = normalizeCategory(editingCategoryName);
+    if (!value) {
+      Alert.alert('Error', 'Category name cannot be empty');
+      return;
+    }
+
+    if (
+      categories.some(
+        category =>
+          category.toLowerCase() === value.toLowerCase() &&
+          category.toLowerCase() !== editingCategory.toLowerCase(),
+      )
+    ) {
+      Alert.alert('Error', 'Category already exists');
+      return;
+    }
+
+    const updatedCategories = categories.map(category =>
+      category === editingCategory ? value : category,
+    );
+    await websiteCategoryStorage.saveAll(updatedCategories);
+    setCategories(updatedCategories);
+
+    const allItems = await websiteStorage.getAll();
+    const affectedItems = allItems.filter(item => item.categories?.includes(editingCategory));
+    await Promise.all(
+      affectedItems.map(item =>
+        websiteStorage.update(item.id, {
+          categories: item.categories?.map(category =>
+            category === editingCategory ? value : category,
+          ),
+        }),
+      ),
+    );
+
+    if (activeFilter === editingCategory) {
+      setActiveFilter(value);
+    }
+
+    setFormData(prev => ({
+      ...prev,
+      categories: prev.categories.map(category =>
+        category === editingCategory ? value : category,
+      ),
+    }));
+
+    setEditingCategory(null);
+    setEditingCategoryName('');
+    await loadItems();
+  };
+
+  const deleteCategory = (categoryToDelete: string) => {
+    Alert.alert(
+      'Delete Category',
+      `Delete "${categoryToDelete}"? This removes it from existing items too.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const updatedCategories = categories.filter(category => category !== categoryToDelete);
+            await websiteCategoryStorage.saveAll(updatedCategories);
+            setCategories(updatedCategories);
+
+            const allItems = await websiteStorage.getAll();
+            const affectedItems = allItems.filter(item => item.categories?.includes(categoryToDelete));
+            await Promise.all(
+              affectedItems.map(item =>
+                websiteStorage.update(item.id, {
+                  categories: item.categories?.filter(category => category !== categoryToDelete),
+                }),
+              ),
+            );
+
+            if (activeFilter === categoryToDelete) {
+              setActiveFilter('All');
+            }
+
+            setFormData(prev => ({
+              ...prev,
+              categories: prev.categories.filter(category => category !== categoryToDelete),
+            }));
+
+            if (editingCategory === categoryToDelete) {
+              setEditingCategory(null);
+              setEditingCategoryName('');
+            }
+
+            await loadItems();
+          },
+        },
+      ],
+    );
+  };
+
+  const filteredItems = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+
+    return items.filter(item => {
+      const matchesSearch =
+        !query ||
+        item.name.toLowerCase().includes(query) ||
+        item.description.toLowerCase().includes(query) ||
+        item.toolLink.toLowerCase().includes(query);
+
+      const matchesFilter =
+        activeFilter === 'All' ||
+        (activeFilter === 'Favorites' ? (item.isFavorite ?? false) : (item.categories || (item.category ? [item.category] : [])).includes(activeFilter));
+
+      const matchesPricing =
+        pricingFilter === 'All' ||
+        (pricingFilter === 'Free' ? (item.pricingType !== 'paid') : (item.pricingType === 'paid'));
+
+      return matchesSearch && matchesFilter && matchesPricing;
+    });
+  }, [items, searchQuery, activeFilter, pricingFilter]);
 
   const displayedItems = [...filteredItems].sort((a, b) => {
     if (activeSort === 'name') {
@@ -360,20 +399,30 @@ export default function WebsiteScreen() {
   });
 
   const uniqueCategories = ['All', 'Favorites', ...categories];
-  const isFavoritesOnly = filterCategory === 'Favorites';
+  const isFavoritesOnly = activeFilter === 'Favorites';
 
   const toggleFavoritesOnly = () => {
-    setFilterCategory(prev => (prev === 'Favorites' ? 'All' : 'Favorites'));
+    setActiveFilter(prev => (prev === 'Favorites' ? 'All' : 'Favorites'));
+  };
+
+  const resetFilters = () => {
+    setSearchQuery('');
+    setActiveFilter('All');
+    setPricingFilter('All');
+    setActiveSort('recent');
   };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        <TouchableOpacity onPress={() => router.replace('/')} style={styles.backButton}>
+          <Ionicons name="home-outline" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[styles.title, { color: colors.text }]}>Website</Text>
-        <TouchableOpacity onPress={openAddModal} style={[styles.addButton, { backgroundColor: colors.primary }]}>
+        <Text style={[styles.title, { color: colors.text }]}>Websites</Text>
+        <TouchableOpacity
+          onPress={openAddModal}
+          style={[styles.addButton, { backgroundColor: colors.primary }]}
+        >
           <Ionicons name="add" size={24} color="#FFFFFF" />
         </TouchableOpacity>
       </View>
@@ -396,7 +445,16 @@ export default function WebsiteScreen() {
           >
             <Ionicons name="funnel-outline" size={16} color={colors.textSecondary} />
             <Text style={[styles.controlButtonText, { color: colors.text }]} numberOfLines={1}>
-              {filterCategory}
+              {activeFilter}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.controlButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={() => setPricingModalVisible(true)}
+          >
+            <Ionicons name="pricetag-outline" size={16} color={colors.textSecondary} />
+            <Text style={[styles.controlButtonText, { color: colors.text }]} numberOfLines={1}>
+              {pricingFilter}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -423,6 +481,12 @@ export default function WebsiteScreen() {
             <Text style={[styles.controlButtonText, { color: colors.text }]} numberOfLines={1}>
               {SORT_OPTIONS.find(option => option.value === activeSort)?.label}
             </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.favoriteFilterButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={resetFilters}
+          >
+            <Ionicons name="refresh-outline" size={16} color={colors.textSecondary} />
           </TouchableOpacity>
         </View>
       </View>
@@ -468,6 +532,9 @@ export default function WebsiteScreen() {
                   </View>
                   <View style={[styles.columnHeaderCategory, { width: columnWidths.category }]}>
                     <Text style={[styles.headerText, { color: colors.textSecondary }]}>Category</Text>
+                  </View>
+                  <View style={[styles.columnHeaderPricing, { width: columnWidths.pricing }]}>
+                    <Text style={[styles.headerText, { color: colors.textSecondary }]}>Pricing</Text>
                   </View>
                   <View style={[styles.columnHeaderLink, { width: columnWidths.link }]}>
                     <Text style={[styles.headerText, { color: colors.textSecondary }]}>Website Link</Text>
@@ -532,7 +599,30 @@ export default function WebsiteScreen() {
                     <View style={[styles.categoryCell, { width: columnWidths.category }]}>
                       <View style={[styles.categoryPill, { backgroundColor: colors.primary + '1A' }]}>
                         <Text style={[styles.categoryPillText, { color: colors.primary }]} numberOfLines={1}>
-                          {item.category || 'Uncategorized'}
+                          {(item.categories || (item.category ? [item.category] : [])).join(', ') || 'Uncategorized'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={[styles.pricingCell, { width: columnWidths.pricing }]}>
+                      <View
+                        style={[
+                          styles.pricingPill,
+                          {
+                            backgroundColor:
+                              item.pricingType === 'paid'
+                                ? colors.warning + '22'
+                                : colors.success + '22',
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.pricingPillText,
+                            { color: item.pricingType === 'paid' ? colors.warning : colors.success },
+                          ]}
+                        >
+                          {item.pricingType === 'paid' ? 'Paid' : 'Free'}
                         </Text>
                       </View>
                     </View>
@@ -572,28 +662,45 @@ export default function WebsiteScreen() {
               </TouchableOpacity>
             </View>
             {selectedItem && (
-              <View style={styles.detailsContent}>
+              <ScrollView style={styles.detailsContent} showsVerticalScrollIndicator={false}>
                 <Text style={[styles.detailsName, { color: colors.text }]}>{selectedItem.name}</Text>
-                <View style={[styles.categoryPill, { backgroundColor: colors.primary + '1A', alignSelf: 'flex-start', marginTop: 8 }]}>
-                  <Text style={[styles.categoryPillText, { color: colors.primary }]}>
-                    {selectedItem.category || 'Uncategorized'}
-                  </Text>
+
+                <View style={styles.metaTagsWrap}>
+                  {(selectedItem.categories || (selectedItem.category ? [selectedItem.category] : [])).map((tag, index) => (
+                    <View key={`${tag}-${index}`} style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
+                      <Text style={[styles.metaTagText, { color: colors.primary }]}>{tag}</Text>
+                    </View>
+                  ))}
                 </View>
 
-                <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Website Link</Text>
-                {selectedItem.toolLink ? (
-                  <TouchableOpacity onPress={() => Linking.openURL(selectedItem.toolLink).catch(() => console.log('Failed to open link'))}>
-                    <Text style={[styles.link, dynamicStyles.link]} numberOfLines={2}>{selectedItem.toolLink}</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <Text style={[styles.mutedText, { color: colors.textSecondary }]}>-</Text>
+                {!!selectedItem.toolLink?.trim() && (
+                  <>
+                    <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Website Link</Text>
+                    <TouchableOpacity onPress={() => Linking.openURL(selectedItem.toolLink).catch(() => console.log('Failed to open link'))}>
+                      <Text style={[styles.link, dynamicStyles.link]} numberOfLines={2}>{selectedItem.toolLink}</Text>
+                    </TouchableOpacity>
+                  </>
                 )}
 
                 <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Description</Text>
                 <Text style={[styles.mutedText, { color: colors.text }]}>
                   {selectedItem.description || 'No description'}
                 </Text>
-              </View>
+
+                <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Pricing</Text>
+                <Text style={[styles.mutedText, { color: colors.text }]}>
+                  {selectedItem.pricingType === 'paid' ? 'Paid' : 'Free'}
+                </Text>
+
+                {selectedItem.pricingType === 'paid' && !!selectedItem.pricingDescription?.trim() && (
+                  <>
+                    <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Pricing Description</Text>
+                    <Text style={[styles.mutedText, { color: colors.text }]}>
+                      {selectedItem.pricingDescription}
+                    </Text>
+                  </>
+                )}
+              </ScrollView>
             )}
           </View>
         </View>
@@ -609,12 +716,12 @@ export default function WebsiteScreen() {
                 key={option}
                 style={styles.optionRow}
                 onPress={() => {
-                  setFilterCategory(option);
+                  setActiveFilter(option);
                   setFilterModalVisible(false);
                 }}
               >
                 <Text style={[styles.optionText, { color: colors.text }]}>{option}</Text>
-                {filterCategory === option && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+                {activeFilter === option && <Ionicons name="checkmark" size={18} color={colors.primary} />}
               </TouchableOpacity>
             ))}
             <TouchableOpacity onPress={() => setFilterModalVisible(false)} style={styles.optionClose}>
@@ -643,6 +750,31 @@ export default function WebsiteScreen() {
               </TouchableOpacity>
             ))}
             <TouchableOpacity onPress={() => setSortModalVisible(false)} style={styles.optionClose}>
+              <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Pricing Modal */}
+      <Modal visible={pricingModalVisible} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={[styles.optionSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Filter by Pricing</Text>
+            {PRICING_FILTER_OPTIONS.map(option => (
+              <TouchableOpacity
+                key={option}
+                style={styles.optionRow}
+                onPress={() => {
+                  setPricingFilter(option);
+                  setPricingModalVisible(false);
+                }}
+              >
+                <Text style={[styles.optionText, { color: colors.text }]}>{option}</Text>
+                {pricingFilter === option && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity onPress={() => setPricingModalVisible(false)} style={styles.optionClose}>
               <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Close</Text>
             </TouchableOpacity>
           </View>
@@ -683,17 +815,47 @@ export default function WebsiteScreen() {
               autoCapitalize="none"
             />
             <FormInput
-              label="One Line Description"
-              placeholder="Brief description of the website"
+              label="Description"
+              placeholder="What does this website do?"
               value={formData.description}
               onChangeText={(text) => setFormData({ ...formData, description: text })}
+              multiline
+              numberOfLines={4}
+              style={styles.textArea}
             />
-            <Select
-              label="Category"
+
+            <MultiSelect
+              label="Categories"
               options={categories}
-              value={formData.category}
-              onChange={(category) => setFormData({ ...formData, category })}
+              selectedValues={formData.categories}
+              onSelect={(categories) => setFormData({ ...formData, categories })}
             />
+
+            <Select
+              label="Pricing Type"
+              options={[...PRICING_OPTIONS]}
+              value={formData.pricingType}
+              onChange={(pricingType) =>
+                setFormData(prev => ({
+                  ...prev,
+                  pricingType: (pricingType as (typeof PRICING_OPTIONS)[number]) || 'free',
+                  pricingDescription:
+                    pricingType === 'paid' ? prev.pricingDescription : '',
+                }))
+              }
+            />
+            {formData.pricingType === 'paid' && (
+              <FormInput
+                label="Pricing Description"
+                placeholder="Explain paid plan details, pricing tiers, and notes"
+                value={formData.pricingDescription}
+                onChangeText={(text) => setFormData({ ...formData, pricingDescription: text })}
+                multiline={true}
+                numberOfLines={4}
+                textAlignVertical="top"
+                style={styles.pricingDescriptionInput}
+              />
+            )}
             <TouchableOpacity
               style={[styles.manageCategoriesButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
               onPress={() => setCategoriesModalVisible(true)}
@@ -892,6 +1054,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'flex-start',
   },
+  columnHeaderPricing: {
+    width: 100,
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+  },
   columnHeaderLink: {
     width: 270,
     paddingHorizontal: 14,
@@ -937,6 +1105,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     alignItems: 'flex-start',
   },
+  pricingCell: {
+    width: 100,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    alignItems: 'flex-start',
+  },
   linkCell: {
     width: 270,
     justifyContent: 'center',
@@ -975,6 +1149,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  pricingPill: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  pricingPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
   link: {
     fontSize: 13,
     fontWeight: '500',
@@ -988,6 +1171,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     marginBottom: 16,
+  },
+  pricingDescriptionInput: {
+    minHeight: 110,
   },
   manageCategoriesText: {
     fontSize: 13,
@@ -1144,5 +1330,43 @@ const styles = StyleSheet.create({
   optionCloseText: {
     fontSize: 14,
     fontWeight: '500',
+  },
+  textArea: {
+    minHeight: 80,
+    maxHeight: 120,
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+  },
+  metaTagsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 4,
+  },
+  metaTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  metaTagText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+  },
+  badgeText: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginLeft: 4,
   },
 });

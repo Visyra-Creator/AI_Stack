@@ -518,6 +518,12 @@ export default function AIStackScreen() {
   const toggleFavoritesOnly = () => {
     setActiveFilter(prev => (prev === 'Favorites' ? 'All' : 'Favorites'));
   };
+  const resetFilters = () => {
+    setSearchQuery('');
+    setActiveFilter('All');
+    setActiveSort('recent');
+    setViewMode('normal');
+  };
 
   const getPricingColor = (pricing: string) => {
     switch (pricing) {
@@ -609,6 +615,12 @@ export default function AIStackScreen() {
             <Text style={[styles.controlButtonText, { color: colors.text }]} numberOfLines={1}>
               {viewMode === 'normal' ? 'Gallery' : 'List'}
             </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.favoriteFilterButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={resetFilters}
+          >
+            <Ionicons name="refresh-outline" size={16} color={colors.textSecondary} />
           </TouchableOpacity>
         </View>
       </View>
