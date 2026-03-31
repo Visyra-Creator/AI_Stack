@@ -24,6 +24,7 @@ import { useTheme } from '@/src/context/ThemeContext';
 import { Card } from '@/src/components/common/Card';
 import { FormInput } from '@/src/components/common/FormInput';
 import { MultiSelect } from '@/src/components/common/MultiSelect';
+import { Select } from '@/src/components/common/Select';
 import { ImagePicker } from '@/src/components/common/ImagePicker';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
@@ -266,6 +267,11 @@ export default function PromptsScreen() {
       return;
     }
 
+    if (!formData.prompt.trim()) {
+      Alert.alert('Error', 'Prompt text is required');
+      return;
+    }
+
     const payload = {
       ...formData,
       inputImage: formData.inputImages[0],
@@ -356,8 +362,8 @@ export default function PromptsScreen() {
     setViewMode('normal');
   };
 
-  const getCategoryFieldConfig = (category: string) => {
-    const normalized = category.toLowerCase();
+  const getCategoryFieldConfig = (category?: string) => {
+    const normalized = (category || '').trim().toLowerCase();
 
     if (normalized === 'image') {
       return {
@@ -403,7 +409,7 @@ export default function PromptsScreen() {
     };
   };
 
-  const categoryConfig = getCategoryFieldConfig(formData.category);
+  const categoryConfig = getCategoryFieldConfig(formData.categories?.[0] || getDefaultCategory());
 
   const getCategoryIcon = (category: string): keyof typeof Ionicons.glyphMap => {
     switch (category) {
@@ -801,6 +807,15 @@ export default function PromptsScreen() {
               placeholder="e.g., Midjourney, ChatGPT"
               value={formData.aiToolUsed}
               onChangeText={(text) => setFormData({ ...formData, aiToolUsed: text })}
+            />
+
+            <FormInput
+              label="Prompt *"
+              placeholder={categoryConfig.promptPlaceholder}
+              value={formData.prompt}
+              onChangeText={(text) => setFormData({ ...formData, prompt: text })}
+              multiline
+              style={styles.textArea}
             />
 
 

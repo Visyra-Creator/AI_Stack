@@ -1,11 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, KeyboardAvoidingView, Platform, ScrollView, Image, useWindowDimensions, FlatList, TextInput } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ExpoImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
-import { Video, ResizeMode } from 'expo-av';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import { useTheme } from '@/src/context/ThemeContext';
 import { Select } from '@/src/components/common/Select';
 import { ImagePicker } from '@/src/components/common/ImagePicker';
@@ -51,6 +51,36 @@ const DEFAULT_STYLE_OPTIONS = [
 
 const IMAGE_SORT_OPTIONS = ['Newest', 'Oldest', 'Category', 'Style'];
 
+type PreviewVideoPlayerProps = {
+  uri: string;
+  shouldPlay: boolean;
+};
+
+function PreviewVideoPlayer({ uri, shouldPlay }: PreviewVideoPlayerProps) {
+  const player = useVideoPlayer(uri, (createdPlayer) => {
+    createdPlayer.loop = false;
+  });
+
+  useEffect(() => {
+    if (shouldPlay) {
+      player.play();
+      return;
+    }
+    player.pause();
+  }, [player, shouldPlay]);
+
+  return (
+    <VideoView
+      player={player}
+      style={styles.previewVideoPlayer}
+      contentFit="contain"
+      nativeControls
+      allowsFullscreen
+      allowsPictureInPicture={false}
+    />
+  );
+}
+
 export default function PhotographyScreen() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -94,7 +124,7 @@ export default function PhotographyScreen() {
     style: '',
     videos: [] as string[],
   });
-  const sections: Array<{ label: string; icon: keyof typeof Ionicons.glyphMap }> = [
+  const sections: { label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
     { label: 'Images', icon: 'images-outline' },
     { label: 'Videos', icon: 'videocam-outline' },
   ];
@@ -1224,14 +1254,7 @@ export default function PhotographyScreen() {
                         ) : null}
                         <Ionicons name="videocam" size={42} color={colors.primary} />
                         <Text style={[styles.previewVideoText, { color: colors.text }]}>Video / Reel</Text>
-                        <Video
-                          source={{ uri: item.uri }}
-                          style={styles.previewVideoPlayer}
-                          resizeMode={ResizeMode.CONTAIN}
-                          useNativeControls
-                          shouldPlay={index === previewIndex}
-                          isLooping={false}
-                        />
+                        <PreviewVideoPlayer uri={item.uri} shouldPlay={index === previewIndex} />
                       </View>
                     )}
                   </View>
@@ -1256,15 +1279,7 @@ export default function PhotographyScreen() {
                       },
                     ]}
                   >
-                    <Video
-                      source={{ uri: currentVideo.uri }}
-                      style={styles.previewVideoPlayer}
-                      resizeMode={ResizeMode.CONTAIN}
-                      useNativeControls
-                      shouldPlay
-                      isLooping={false}
-                    />
-                  </View>
+                    <PreviewVideoPlayer uri={currentVideo.uri} shouldPlay />
 
                   {displayedVideos.length > 1 && (
                     <>
@@ -1293,6 +1308,7 @@ export default function PhotographyScreen() {
                       </TouchableOpacity>
                     </>
                   )}
+                </View>
                 </View>
               );
             })()}

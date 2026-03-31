@@ -4,6 +4,7 @@ const POCKETBASE_URL = process.env.EXPO_PUBLIC_POCKETBASE_URL?.trim();
 const USE_POCKETBASE = process.env.EXPO_PUBLIC_USE_POCKETBASE === 'true' && !!POCKETBASE_URL;
 
 const pb = POCKETBASE_URL ? new PocketBase(POCKETBASE_URL) : null;
+const MAX_RESOURCE_PAYLOAD_LENGTH = 5000;
 
 const KEY_TO_KIND: Record<string, string> = {
   ai_stack: 'ai_stack',
@@ -82,6 +83,62 @@ const resolveCategory = (item: any): string => {
     item?.category ??
     (Array.isArray(item?.categories) && item.categories.length > 0 ? item.categories[0] : '');
   return clampText(rawCategory, 120);
+};
+
+const serializePayloadWithinLimit = (kind: string, payload: Record<string, any>): string => {
+  const toJson = (value: Record<string, any>) => JSON.stringify(value);
+  const clone = { ...payload };
+  let serialized = toJson(clone);
+  if (serialized.length <= MAX_RESOURCE_PAYLOAD_LENGTH) return serialized;
+
+  // Remove heavy binary/document reference fields first.
+  const heavyKeys = ['files', 'images', 'inputImages', 'generatedImages', 'inputImage', 'generatedImage', 'videoFile'];
+  for (const key of heavyKeys) {
+    if (key in clone) {
+      delete clone[key];
+      serialized = toJson(clone);
+      if (serialized.length <= MAX_RESOURCE_PAYLOAD_LENGTH) return serialized;
+    }
+  }
+
+  // Then progressively trim long text fields.
+  const textKeys = kind === 'prompts'
+    ? ['description', 'prompt', 'instructions', 'guides', 'content']
+    : ['description', 'instructions', 'guides', 'prompt', 'content'];
+
+  for (const key of textKeys) {
+    if (typeof clone[key] !== 'string') continue;
+    let value = clone[key] as string;
+    while (value.length > 80) {
+      value = value.slice(0, Math.floor(value.length * 0.7));
+      clone[key] = value;
+      serialized = toJson(clone);
+      if (serialized.length <= MAX_RESOURCE_PAYLOAD_LENGTH) return serialized;
+    }
+  }
+
+  // Final fallback keeps sync alive with essential metadata only.
+  const minimal = {
+    id: clone.id,
+    createdAt: clone.createdAt,
+    updatedAt: clone.updatedAt,
+    type: clone.type,
+    category: clone.category,
+    categories: Array.isArray(clone.categories) ? clone.categories.slice(0, 3) : undefined,
+    promptName: clone.promptName,
+    toolName: clone.toolName,
+    tutorialName: clone.tutorialName,
+    name: clone.name,
+    sectionName: clone.sectionName,
+    aiToolUsed: clone.aiToolUsed,
+    isFavorite: clone.isFavorite,
+    syncTruncated: true,
+  };
+
+  serialized = toJson(minimal);
+  return serialized.length <= MAX_RESOURCE_PAYLOAD_LENGTH
+    ? serialized
+    : serialized.slice(0, MAX_RESOURCE_PAYLOAD_LENGTH);
 };
 
 const getSyncErrorDetails = (error: unknown) => {
@@ -170,9 +227,11 @@ export async function savePocketBaseItems<T>(key: string, items: T[]): Promise<v
   }
 
   const byLegacy = new Map(existing.map((record) => [record.legacy_id, record]));
+  const attemptedLegacyIds = new Set<string>();
 
   for (const item of items as any[]) {
     const legacyId = item.id ?? generateId();
+    attemptedLegacyIds.add(legacyId);
     const updatedAt = item.updatedAt ?? Date.now();
     const createdAt = item.createdAt ?? updatedAt;
     const payload = { ...item, id: legacyId, updatedAt };
@@ -182,7 +241,7 @@ export async function savePocketBaseItems<T>(key: string, items: T[]): Promise<v
       title: resolveTitle(item),
       category: resolveCategory(item),
       is_favorite: !!item.isFavorite,
-      payload: JSON.stringify(payload),
+      payload: serializePayloadWithinLimit(kind, payload),
       created_at: toIso(createdAt),
       updated_at: toIso(updatedAt),
       favorited_at: item.favoritedAt ? toIso(item.favoritedAt) : undefined,
@@ -225,6 +284,9 @@ export async function savePocketBaseItems<T>(key: string, items: T[]): Promise<v
 
   // Remove stale records that are no longer in the latest saved list.
   for (const stale of byLegacy.values()) {
+    if (attemptedLegacyIds.has(stale.legacy_id)) {
+      continue;
+    }
     try {
       await pb.collection('resources').delete(stale.id);
     } catch (error) {
@@ -263,7 +325,7 @@ export async function addPocketBaseItem<T extends { id: string; createdAt: numbe
     title: resolveTitle(newItem),
     category: resolveCategory(newItem),
     is_favorite: !!(newItem as any).isFavorite,
-    payload: JSON.stringify(newItem),
+    payload: serializePayloadWithinLimit(kind, newItem as Record<string, any>),
     created_at: toIso(now),
     updated_at: toIso(now),
     favorited_at: (newItem as any).favoritedAt ? toIso((newItem as any).favoritedAt) : undefined,
@@ -305,7 +367,7 @@ export async function updatePocketBaseItem<T extends { id: string }>(
     title: resolveTitle(merged),
     category: resolveCategory(merged),
     is_favorite: !!merged.isFavorite,
-    payload: JSON.stringify(merged),
+    payload: serializePayloadWithinLimit(kind, merged),
     updated_at: toIso(merged.updatedAt),
     favorited_at: merged.favoritedAt ? toIso(merged.favoritedAt) : undefined,
   });

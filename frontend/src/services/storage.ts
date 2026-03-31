@@ -114,6 +114,7 @@ export interface PromptItem {
   generatedImage?: string;
   inputImages?: string[];
   generatedImages?: string[];
+  files?: string[];
   aiToolUsed: string;
   category: string;
   categories?: string[];
