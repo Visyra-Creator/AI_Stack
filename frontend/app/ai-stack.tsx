@@ -30,6 +30,7 @@ import { Select } from '@/src/components/common/Select';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { aiStackStorage, aiStackCategoryStorage, AIStackItem } from '@/src/services/storage';
+import { openUriExternally } from '@/src/services/fileOpener';
 
 const PRICING_OPTIONS = ['free', 'paid', 'freemium'];
 const SORT_OPTIONS = [
@@ -425,12 +426,10 @@ export default function AIStackScreen() {
     }
 
     try {
-      const supported = await Linking.canOpenURL(uri);
-      if (!supported) {
+      const opened = await openUriExternally(uri);
+      if (!opened) {
         Alert.alert('Unable to open file', 'No app available to open this file type.');
-        return;
       }
-      await Linking.openURL(uri);
     } catch {
       Alert.alert('Unable to open file', 'Something went wrong while opening this attachment.');
     }

@@ -59,6 +59,10 @@ export default function ToolsScreen() {
   const [viewMode, setViewMode] = useState<ViewMode>('normal');
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [sortModalVisible, setSortModalVisible] = useState(false);
+  const [categoriesModalVisible, setCategoriesModalVisible] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState('');
 
   const [formData, setFormData] = useState({
     toolName: '',
@@ -94,6 +98,106 @@ export default function ToolsScreen() {
     setRefreshing(true);
     await Promise.all([loadItems(), loadCategories()]);
     setRefreshing(false);
+  };
+
+  const normalizeCategory = (value: string) => value.trim();
+
+  const getDefaultCategory = (source?: string[]) => {
+    const current = source || categories;
+    if (current.includes('Other')) return 'Other';
+    if (current.includes('other')) return 'other';
+    if (current.length > 0) return current[0];
+    return 'other';
+  };
+
+  const addCategory = async () => {
+    const value = normalizeCategory(newCategoryName);
+    if (!value) {
+      Alert.alert('Error', 'Category name cannot be empty');
+      return;
+    }
+    if (categories.some((category) => category.toLowerCase() === value.toLowerCase())) {
+      Alert.alert('Error', 'Category already exists');
+      return;
+    }
+
+    const updatedCategories = [...categories, value].sort((a, b) => {
+      if (a.toLowerCase() === 'other') return 1;
+      if (b.toLowerCase() === 'other') return -1;
+      return a.localeCompare(b, undefined, { sensitivity: 'base' });
+    });
+    await toolCategoryStorage.saveAll(updatedCategories);
+    setCategories(updatedCategories);
+    setNewCategoryName('');
+  };
+
+  const startEditCategory = (category: string) => {
+    setEditingCategory(category);
+    setEditingCategoryName(category);
+  };
+
+  const saveEditedCategory = async () => {
+    if (!editingCategory) return;
+    const value = normalizeCategory(editingCategoryName);
+    if (!value) {
+      Alert.alert('Error', 'Category name cannot be empty');
+      return;
+    }
+    if (
+      categories.some(
+        (category) =>
+          category.toLowerCase() === value.toLowerCase() &&
+          category.toLowerCase() !== editingCategory.toLowerCase(),
+      )
+    ) {
+      Alert.alert('Error', 'Category already exists');
+      return;
+    }
+
+    const updatedCategories = categories.map((category) =>
+      category === editingCategory ? value : category,
+    );
+    await toolCategoryStorage.saveAll(updatedCategories);
+    setCategories(updatedCategories);
+    setFormData((prev) => ({
+      ...prev,
+      categories: prev.categories.map((category) => (category === editingCategory ? value : category)),
+    }));
+    if (activeFilter === editingCategory) {
+      setActiveFilter(value);
+    }
+    setEditingCategory(null);
+    setEditingCategoryName('');
+  };
+
+  const deleteCategory = (categoryToDelete: string) => {
+    Alert.alert('Delete Category', `Delete "${categoryToDelete}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const updatedCategories = categories.filter((category) => category !== categoryToDelete);
+          const fallback = getDefaultCategory(updatedCategories);
+          await toolCategoryStorage.saveAll(updatedCategories);
+          setCategories(updatedCategories);
+          setFormData((prev) => {
+            const nextCategories = prev.categories.filter((category) => category !== categoryToDelete);
+            return {
+              ...prev,
+              categories: nextCategories.length > 0 ? nextCategories : [fallback],
+            };
+          });
+          if (activeFilter === categoryToDelete) {
+            setActiveFilter('All');
+          }
+          if (editingCategory === categoryToDelete) {
+            setEditingCategory(null);
+            setEditingCategoryName('');
+          }
+        },
+      },
+    ]);
   };
 
   const resetForm = () => {
@@ -146,9 +250,9 @@ export default function ToolsScreen() {
     }
 
     if (editingItem) {
-      await toolsStorage.update(editingItem.id, formData);
+      await toolStorage.update(editingItem.id, formData);
     } else {
-      await toolsStorage.add(formData);
+      await toolStorage.add(formData);
     }
 
     await loadItems();
@@ -163,7 +267,7 @@ export default function ToolsScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await toolsStorage.delete(item.id);
+          await toolStorage.delete(item.id);
           await loadItems();
         },
       },
@@ -172,7 +276,7 @@ export default function ToolsScreen() {
 
   const toggleFavorite = async (item: ToolItem) => {
     const nextFavorite = !(item.isFavorite ?? false);
-    await toolsStorage.update(item.id, { isFavorite: nextFavorite });
+    await toolStorage.update(item.id, { isFavorite: nextFavorite });
     setItems(prev => prev.map(current => (current.id === item.id ? { ...current, isFavorite: nextFavorite } : current)));
   };
 
@@ -183,6 +287,12 @@ export default function ToolsScreen() {
 
   const getToolPreviewLine = (item: ToolItem) => {
     const raw = (item.description?.trim() || item.instructions?.trim() || '').trim();
+    if (!raw) return '';
+    return raw.split('\n')[0].trim();
+  };
+
+  const getCardSubtitle = (item: ToolItem) => {
+    const raw = (item.description?.trim() || '').trim();
     if (!raw) return '';
     return raw.split('\n')[0].trim();
   };
@@ -495,6 +605,14 @@ export default function ToolsScreen() {
               onSelect={(categories) => setFormData({ ...formData, categories })}
             />
 
+            <TouchableOpacity
+              style={[styles.manageCategoriesButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={() => setCategoriesModalVisible(true)}
+            >
+              <Ionicons name="settings-outline" size={16} color={colors.textSecondary} />
+              <Text style={[styles.manageCategoriesText, { color: colors.text }]}>Manage Categories</Text>
+            </TouchableOpacity>
+
             <View style={styles.imageSection}>
               <ImagePicker
                 label="Tool Image"
@@ -624,6 +742,74 @@ export default function ToolsScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={categoriesModalVisible} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={[styles.optionSheet, { backgroundColor: colors.card, borderColor: colors.border }] }>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Manage Categories</Text>
+
+            <View style={[styles.categoryInputRow, { borderColor: colors.border, backgroundColor: colors.surface }] }>
+              <TextInput
+                value={newCategoryName}
+                onChangeText={setNewCategoryName}
+                placeholder="New category"
+                placeholderTextColor={colors.textSecondary}
+                style={[styles.categoryInput, { color: colors.text }]}
+              />
+              <TouchableOpacity
+                style={[styles.categoryActionButton, { backgroundColor: colors.primary }]}
+                onPress={addCategory}
+              >
+                <Ionicons name="add" size={16} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.categoriesList}>
+              {categories.map((category) => (
+                <View key={category} style={[styles.categoryRow, { borderBottomColor: colors.border }] }>
+                  {editingCategory === category ? (
+                    <TextInput
+                      value={editingCategoryName}
+                      onChangeText={setEditingCategoryName}
+                      style={[styles.categoryEditInput, { color: colors.text, borderColor: colors.border }]}
+                    />
+                  ) : (
+                    <Text style={[styles.optionText, { color: colors.text }]}>{category}</Text>
+                  )}
+
+                  <View style={styles.categoryActions}>
+                    {editingCategory === category ? (
+                      <TouchableOpacity onPress={saveEditedCategory} style={styles.categoryIconButton}>
+                        <Ionicons name="checkmark" size={18} color={colors.success} />
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity onPress={() => startEditCategory(category)} style={styles.categoryIconButton}>
+                        <Ionicons name="create-outline" size={17} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity onPress={() => deleteCategory(category)} style={styles.categoryIconButton}>
+                      <Ionicons name="trash-outline" size={17} color={colors.danger} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              onPress={() => {
+                setCategoriesModalVisible(false);
+                setEditingCategory(null);
+                setEditingCategoryName('');
+                setNewCategoryName('');
+              }}
+              style={styles.optionClose}
+            >
+              <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -906,5 +1092,66 @@ const styles = StyleSheet.create({
   metaTagText: {
     fontSize: 11,
     fontWeight: '600',
+  },
+  manageCategoriesButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  manageCategoriesText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  categoryInputRow: {
+    borderWidth: 1,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    marginBottom: 10,
+  },
+  categoryInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 10,
+  },
+  categoryActionButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoriesList: {
+    maxHeight: 240,
+  },
+  categoryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  categoryActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  categoryIconButton: {
+    padding: 4,
+  },
+  categoryEditInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    fontSize: 14,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    marginRight: 8,
   },
 });

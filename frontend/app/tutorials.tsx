@@ -27,6 +27,8 @@ import { Button } from '@/src/components/common/Button';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { tutorialsStorage, TutorialItem, tutorialsCategoryStorage } from '@/src/services/storage';
 import { MultiSelect } from '@/src/components/common/MultiSelect';
+import { PDFViewer } from '@/src/components/common/PDFViewer';
+import { openUriExternally } from '@/src/services/fileOpener';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -61,10 +63,37 @@ export default function TutorialsScreen() {
   const [viewMode, setViewMode] = useState<ViewMode>('normal');
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [sortModalVisible, setSortModalVisible] = useState(false);
+  const [categoriesModalVisible, setCategoriesModalVisible] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState('');
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [isManualSyncing, setIsManualSyncing] = useState(false);
   const [syncToast, setSyncToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const syncToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [pdfViewerVisible, setPdfViewerVisible] = useState(false);
+  const [pdfViewerUri, setPdfViewerUri] = useState<string>('');
+  const [pdfViewerName, setPdfViewerName] = useState<string>('');
+
+  const showSyncToast = useCallback((text: string, type: 'success' | 'error') => {
+    if (syncToastTimerRef.current) {
+      clearTimeout(syncToastTimerRef.current);
+    }
+    setSyncToast({ text, type });
+    syncToastTimerRef.current = setTimeout(() => {
+      setSyncToast(null);
+      syncToastTimerRef.current = null;
+    }, 2000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (syncToastTimerRef.current) {
+        clearTimeout(syncToastTimerRef.current);
+      }
+    };
+  }, []);
 
   const [formData, setFormData] = useState({
     tutorialName: '',
@@ -102,6 +131,106 @@ export default function TutorialsScreen() {
     setRefreshing(true);
     await Promise.all([loadItems(), loadCategories()]);
     setRefreshing(false);
+  };
+
+  const normalizeCategory = (value: string) => value.trim();
+
+  const getDefaultCategory = (source?: string[]) => {
+    const current = source || categories;
+    if (current.includes('Other')) return 'Other';
+    if (current.includes('other')) return 'other';
+    if (current.length > 0) return current[0];
+    return 'other';
+  };
+
+  const addCategory = async () => {
+    const value = normalizeCategory(newCategoryName);
+    if (!value) {
+      Alert.alert('Error', 'Category name cannot be empty');
+      return;
+    }
+    if (categories.some((category) => category.toLowerCase() === value.toLowerCase())) {
+      Alert.alert('Error', 'Category already exists');
+      return;
+    }
+
+    const updatedCategories = [...categories, value].sort((a, b) => {
+      if (a.toLowerCase() === 'other') return 1;
+      if (b.toLowerCase() === 'other') return -1;
+      return a.localeCompare(b, undefined, { sensitivity: 'base' });
+    });
+    await tutorialsCategoryStorage.saveAll(updatedCategories);
+    setCategories(updatedCategories);
+    setNewCategoryName('');
+  };
+
+  const startEditCategory = (category: string) => {
+    setEditingCategory(category);
+    setEditingCategoryName(category);
+  };
+
+  const saveEditedCategory = async () => {
+    if (!editingCategory) return;
+    const value = normalizeCategory(editingCategoryName);
+    if (!value) {
+      Alert.alert('Error', 'Category name cannot be empty');
+      return;
+    }
+    if (
+      categories.some(
+        (category) =>
+          category.toLowerCase() === value.toLowerCase() &&
+          category.toLowerCase() !== editingCategory.toLowerCase(),
+      )
+    ) {
+      Alert.alert('Error', 'Category already exists');
+      return;
+    }
+
+    const updatedCategories = categories.map((category) =>
+      category === editingCategory ? value : category,
+    );
+    await tutorialsCategoryStorage.saveAll(updatedCategories);
+    setCategories(updatedCategories);
+    setFormData((prev) => ({
+      ...prev,
+      categories: prev.categories.map((category) => (category === editingCategory ? value : category)),
+    }));
+    if (activeFilter === editingCategory) {
+      setActiveFilter(value);
+    }
+    setEditingCategory(null);
+    setEditingCategoryName('');
+  };
+
+  const deleteCategory = (categoryToDelete: string) => {
+    Alert.alert('Delete Category', `Delete "${categoryToDelete}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const updatedCategories = categories.filter((category) => category !== categoryToDelete);
+          const fallback = getDefaultCategory(updatedCategories);
+          await tutorialsCategoryStorage.saveAll(updatedCategories);
+          setCategories(updatedCategories);
+          setFormData((prev) => {
+            const nextCategories = prev.categories.filter((category) => category !== categoryToDelete);
+            return {
+              ...prev,
+              categories: nextCategories.length > 0 ? nextCategories : [fallback],
+            };
+          });
+          if (activeFilter === categoryToDelete) {
+            setActiveFilter('All');
+          }
+          if (editingCategory === categoryToDelete) {
+            setEditingCategory(null);
+            setEditingCategoryName('');
+          }
+        },
+      },
+    ]);
   };
 
   const formatRelativeSync = (timestamp: number): string => {
@@ -272,11 +401,28 @@ export default function TutorialsScreen() {
 
   const openFile = async (fileStr: string) => {
     const uri = getFileUri(fileStr);
+    const fileName = getFileName(fileStr);
     if (!uri) {
       Alert.alert('Unable to open file', 'This attachment is missing a valid file path.');
       return;
     }
-    await openExternalLink(uri);
+    try {
+      const isPdf = fileName.toLowerCase().endsWith('.pdf') || uri.toLowerCase().includes('pdf');
+      if (isPdf) {
+        setPdfViewerUri(uri);
+        setPdfViewerName(fileName);
+        setPdfViewerVisible(true);
+      } else if (uri.startsWith('http://') || uri.startsWith('https://')) {
+        await openExternalLink(uri);
+      } else {
+        const opened = await openUriExternally(uri);
+        if (!opened) {
+          Alert.alert('Unable to open file', 'No app is available to open this file.');
+        }
+      }
+    } catch {
+      Alert.alert('Unable to open file', 'Something went wrong while opening this file.');
+    }
   };
 
   const renderLinkedText = (value: string) => {
@@ -622,6 +768,14 @@ export default function TutorialsScreen() {
               onSelect={(categories) => setFormData({ ...formData, categories })}
             />
 
+            <TouchableOpacity
+              style={[styles.manageCategoriesButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={() => setCategoriesModalVisible(true)}
+            >
+              <Ionicons name="settings-outline" size={16} color={colors.textSecondary} />
+              <Text style={[styles.manageCategoriesText, { color: colors.text }]}>Manage Categories</Text>
+            </TouchableOpacity>
+
             <View style={styles.filesSection}>
               <Text style={[styles.filesLabel, { color: colors.textSecondary }]}>Files</Text>
               <Button title="Add Files" onPress={pickFiles} variant="outline" />
@@ -767,6 +921,73 @@ export default function TutorialsScreen() {
         </View>
       </Modal>
 
+      <Modal visible={categoriesModalVisible} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={[styles.optionSheet, { backgroundColor: colors.card, borderColor: colors.border }] }>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Manage Categories</Text>
+
+            <View style={[styles.categoryInputRow, { borderColor: colors.border, backgroundColor: colors.surface }] }>
+              <TextInput
+                value={newCategoryName}
+                onChangeText={setNewCategoryName}
+                placeholder="New category"
+                placeholderTextColor={colors.textSecondary}
+                style={[styles.categoryInput, { color: colors.text }]}
+              />
+              <TouchableOpacity
+                style={[styles.categoryActionButton, { backgroundColor: colors.primary }]}
+                onPress={addCategory}
+              >
+                <Ionicons name="add" size={16} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.categoriesList}>
+              {categories.map((category) => (
+                <View key={category} style={[styles.categoryRow, { borderBottomColor: colors.border }] }>
+                  {editingCategory === category ? (
+                    <TextInput
+                      value={editingCategoryName}
+                      onChangeText={setEditingCategoryName}
+                      style={[styles.categoryEditInput, { color: colors.text, borderColor: colors.border }]}
+                    />
+                  ) : (
+                    <Text style={[styles.optionText, { color: colors.text }]}>{category}</Text>
+                  )}
+
+                  <View style={styles.categoryActions}>
+                    {editingCategory === category ? (
+                      <TouchableOpacity onPress={saveEditedCategory} style={styles.categoryIconButton}>
+                        <Ionicons name="checkmark" size={18} color={colors.success} />
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity onPress={() => startEditCategory(category)} style={styles.categoryIconButton}>
+                        <Ionicons name="create-outline" size={17} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity onPress={() => deleteCategory(category)} style={styles.categoryIconButton}>
+                      <Ionicons name="trash-outline" size={17} color={colors.danger} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              onPress={() => {
+                setCategoriesModalVisible(false);
+                setEditingCategory(null);
+                setEditingCategoryName('');
+                setNewCategoryName('');
+              }}
+              style={styles.optionClose}
+            >
+              <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {syncToast && (
         <View
           style={[
@@ -777,6 +998,14 @@ export default function TutorialsScreen() {
           <Text style={styles.syncToastText}>{syncToast.text}</Text>
         </View>
       )}
+
+      <PDFViewer
+        visible={pdfViewerVisible}
+        uri={pdfViewerUri}
+        fileName={pdfViewerName}
+        onClose={() => setPdfViewerVisible(false)}
+        colors={colors}
+      />
     </SafeAreaView>
   );
 }
@@ -1133,5 +1362,66 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '700',
+  },
+  manageCategoriesButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  manageCategoriesText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  categoryInputRow: {
+    borderWidth: 1,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    marginBottom: 10,
+  },
+  categoryInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 10,
+  },
+  categoryActionButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoriesList: {
+    maxHeight: 240,
+  },
+  categoryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  categoryActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  categoryIconButton: {
+    padding: 4,
+  },
+  categoryEditInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    fontSize: 14,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    marginRight: 8,
   },
 });

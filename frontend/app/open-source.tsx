@@ -25,12 +25,13 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '@/src/context/ThemeContext';
 import { Card } from '@/src/components/common/Card';
 import { FormInput } from '@/src/components/common/FormInput';
-import { Select } from '@/src/components/common/Select';
 import { Button } from '@/src/components/common/Button';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { openSourceStorage, openSourceCategoryStorage, OpenSourceItem } from '@/src/services/storage';
 import { MultiSelect } from '@/src/components/common/MultiSelect';
+import { PDFViewer } from '@/src/components/common/PDFViewer';
+import { openUriExternally } from '@/src/services/fileOpener';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -68,6 +69,10 @@ export default function OpenSourceScreen() {
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState('');
 
+  const [pdfViewerVisible, setPdfViewerVisible] = useState(false);
+  const [pdfViewerUri, setPdfViewerUri] = useState<string>('');
+  const [pdfViewerName, setPdfViewerName] = useState<string>('');
+
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -103,6 +108,114 @@ export default function OpenSourceScreen() {
     setRefreshing(true);
     await Promise.all([loadItems(), loadCategories()]);
     setRefreshing(false);
+  };
+
+  const normalizeCategory = (value: string) => value.trim();
+
+  const getDefaultCategory = (source?: string[]) => {
+    const current = source || categories;
+    if (current.includes('Other')) return 'Other';
+    if (current.includes('other')) return 'other';
+    if (current.length > 0) return current[0];
+    return 'other';
+  };
+
+  const addCategory = async () => {
+    const value = normalizeCategory(newCategoryName);
+    if (!value) {
+      Alert.alert('Error', 'Category name cannot be empty');
+      return;
+    }
+    if (categories.some((category) => category.toLowerCase() === value.toLowerCase())) {
+      Alert.alert('Error', 'Category already exists');
+      return;
+    }
+
+    const updatedCategories = [...categories, value].sort((a, b) => {
+      if (a.toLowerCase() === 'other') return 1;
+      if (b.toLowerCase() === 'other') return -1;
+      return a.localeCompare(b, undefined, { sensitivity: 'base' });
+    });
+
+    await openSourceCategoryStorage.saveAll(updatedCategories);
+    setCategories(updatedCategories);
+    setNewCategoryName('');
+  };
+
+  const startEditCategory = (category: string) => {
+    setEditingCategory(category);
+    setEditingCategoryName(category);
+  };
+
+  const saveEditedCategory = async () => {
+    if (!editingCategory) return;
+    const value = normalizeCategory(editingCategoryName);
+    if (!value) {
+      Alert.alert('Error', 'Category name cannot be empty');
+      return;
+    }
+    if (
+      categories.some(
+        (category) =>
+          category.toLowerCase() === value.toLowerCase() &&
+          category.toLowerCase() !== editingCategory.toLowerCase(),
+      )
+    ) {
+      Alert.alert('Error', 'Category already exists');
+      return;
+    }
+
+    const updatedCategories = categories.map((category) =>
+      category === editingCategory ? value : category,
+    );
+    await openSourceCategoryStorage.saveAll(updatedCategories);
+    setCategories(updatedCategories);
+    setFormData((prev) => {
+      const nextCategories = prev.categories.map((category) =>
+        category === editingCategory ? value : category,
+      );
+      return {
+        ...prev,
+        category: prev.category === editingCategory ? value : prev.category,
+        categories: nextCategories,
+      };
+    });
+    if (activeFilter === editingCategory) {
+      setActiveFilter(value);
+    }
+    setEditingCategory(null);
+    setEditingCategoryName('');
+  };
+
+  const deleteCategory = (categoryToDelete: string) => {
+    Alert.alert('Delete Category', `Delete "${categoryToDelete}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const updatedCategories = categories.filter((category) => category !== categoryToDelete);
+          const fallback = getDefaultCategory(updatedCategories);
+          await openSourceCategoryStorage.saveAll(updatedCategories);
+          setCategories(updatedCategories);
+          setFormData((prev) => {
+            const nextCategories = prev.categories.filter((category) => category !== categoryToDelete);
+            return {
+              ...prev,
+              category: prev.category === categoryToDelete ? fallback : prev.category,
+              categories: nextCategories.length > 0 ? nextCategories : [fallback],
+            };
+          });
+          if (activeFilter === categoryToDelete) {
+            setActiveFilter('All');
+          }
+          if (editingCategory === categoryToDelete) {
+            setEditingCategory(null);
+            setEditingCategoryName('');
+          }
+        },
+      },
+    ]);
   };
 
   const resetForm = () => {
@@ -291,18 +404,26 @@ export default function OpenSourceScreen() {
 
   const openFile = async (fileStr: string) => {
     const uri = getFileUri(fileStr);
+    const fileName = getFileName(fileStr);
     if (!uri) {
       Alert.alert('Unable to open file', 'This attachment is missing a valid file path.');
       return;
     }
 
     try {
-      const supported = await Linking.canOpenURL(uri);
-      if (!supported) {
-        Alert.alert('Unable to open file', 'No app available to open this file type.');
-        return;
+      const isPdf = fileName.toLowerCase().endsWith('.pdf') || uri.toLowerCase().includes('pdf');
+      if (isPdf) {
+        setPdfViewerUri(uri);
+        setPdfViewerName(fileName);
+        setPdfViewerVisible(true);
+      } else if (uri.startsWith('http://') || uri.startsWith('https://')) {
+        await openExternalLink(uri);
+      } else {
+        const opened = await openUriExternally(uri);
+        if (!opened) {
+          Alert.alert('Unable to open file', 'No app available to open this file.');
+        }
       }
-      await Linking.openURL(uri);
     } catch {
       Alert.alert('Unable to open file', 'Something went wrong while opening this attachment.');
     }
@@ -624,6 +745,20 @@ export default function OpenSourceScreen() {
                   ))}
                 </View>
 
+                {!!selectedItem.description?.trim() && (
+                  <View style={styles.detailsSection}>
+                    <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Description</Text>
+                    {renderLinkedText(selectedItem.description)}
+                  </View>
+                )}
+
+                {!!selectedItem.instructions?.trim() && (
+                  <View style={styles.detailsSection}>
+                    <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Instructions</Text>
+                    {renderLinkedText(selectedItem.instructions)}
+                  </View>
+                )}
+
                 {selectedItem.links && selectedItem.links.length > 0 && (
                   <View style={styles.detailsSection}>
                     <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Links</Text>
@@ -720,12 +855,6 @@ export default function OpenSourceScreen() {
               multiline
               numberOfLines={3}
               style={styles.textArea}
-            />
-            <Select
-              label="Category"
-              options={categories}
-              value={formData.category}
-              onChange={(category) => setFormData({ ...formData, category })}
             />
             <MultiSelect
               label="Categories"
@@ -974,6 +1103,14 @@ export default function OpenSourceScreen() {
             </View>
           </View>
         </Modal>
+
+        <PDFViewer
+          visible={pdfViewerVisible}
+          uri={pdfViewerUri}
+          fileName={pdfViewerName}
+          onClose={() => setPdfViewerVisible(false)}
+          colors={colors}
+        />
     </SafeAreaView>
   );
 }

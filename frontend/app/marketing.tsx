@@ -28,7 +28,6 @@ import { Select } from '@/src/components/common/Select';
 import { Button } from '@/src/components/common/Button';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { marketingStorage, marketingCategoryStorage, MarketingItem } from '@/src/services/storage';
-import { MultiSelect } from '@/src/components/common/MultiSelect';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -48,6 +47,8 @@ export default function MarketingScreen() {
   const galleryCardWidth = (windowWidth - (galleryColumns - 1) * gap) / galleryColumns;
   const [items, setItems] = useState<MarketingItem[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
+  const [detailsVisible, setDetailsVisible] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<MarketingItem | null>(null);
   const [editingItem, setEditingItem] = useState<MarketingItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
@@ -67,6 +68,7 @@ export default function MarketingScreen() {
     name: '',
     toolLink: '',
     description: '',
+    category: '',
     categories: [] as string[],
     instructions: '',
     link: '',
@@ -102,11 +104,85 @@ export default function MarketingScreen() {
     setRefreshing(false);
   };
 
+  const getDefaultCategory = (source?: string[]) => {
+    const current = source || categories;
+    if (current.includes('Other')) return 'Other';
+    if (current.includes('other')) return 'other';
+    if (current.length > 0) return current[0];
+    return 'other';
+  };
+
+  const normalizeCategory = (value: string) => value.trim();
+
+
+  const startEditCategory = (category: string) => {
+    setEditingCategory(category);
+    setEditingCategoryName(category);
+  };
+
+  const saveEditedCategory = async () => {
+    if (!editingCategory) return;
+    const value = normalizeCategory(editingCategoryName);
+    if (!value) {
+      Alert.alert('Error', 'Category name cannot be empty');
+      return;
+    }
+    if (
+      categories.some(
+        (category) =>
+          category.toLowerCase() === value.toLowerCase() &&
+          category.toLowerCase() !== editingCategory.toLowerCase(),
+      )
+    ) {
+      Alert.alert('Error', 'Category already exists');
+      return;
+    }
+
+    const updatedCategories = categories.map((category) =>
+      category === editingCategory ? value : category,
+    );
+    await marketingCategoryStorage.saveAll(updatedCategories);
+    setCategories(updatedCategories);
+    setFormData((prev) => ({
+      ...prev,
+      category: prev.category === editingCategory ? value : prev.category,
+      categories: prev.categories.map((category) => (category === editingCategory ? value : category)),
+    }));
+    setEditingCategory(null);
+    setEditingCategoryName('');
+  };
+
+  const deleteCategory = (categoryToDelete: string) => {
+    Alert.alert('Delete Category', `Delete "${categoryToDelete}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const updatedCategories = categories.filter((category) => category !== categoryToDelete);
+          const fallback = getDefaultCategory(updatedCategories);
+          await marketingCategoryStorage.saveAll(updatedCategories);
+          setCategories(updatedCategories);
+          setFormData((prev) => ({
+            ...prev,
+            category: prev.category === categoryToDelete ? fallback : prev.category,
+            categories: prev.categories.filter((category) => category !== categoryToDelete),
+          }));
+          if (editingCategory === categoryToDelete) {
+            setEditingCategory(null);
+            setEditingCategoryName('');
+          }
+        },
+      },
+    ]);
+  };
+
   const resetForm = () => {
     setFormData({
       name: '',
       toolLink: '',
       description: '',
+      category: '',
       categories: [],
       instructions: '',
       link: '',
@@ -129,6 +205,7 @@ export default function MarketingScreen() {
       name: item.name,
       toolLink: item.toolLink,
       description: item.description,
+      category: item.category || (item.categories && item.categories.length > 0 ? item.categories[0] : ''),
       categories: item.categories || (item.category ? [item.category] : []),
       instructions: item.instructions,
       link: item.link,
@@ -140,6 +217,11 @@ export default function MarketingScreen() {
     setModalVisible(true);
   };
 
+  const openDetailsModal = (item: MarketingItem) => {
+    setSelectedItem(item);
+    setDetailsVisible(true);
+  };
+
   const handleSave = async () => {
     if (!formData.name.trim()) {
       Alert.alert('Error', 'Name is required');
@@ -148,6 +230,7 @@ export default function MarketingScreen() {
 
     const payload = {
       ...formData,
+      category: formData.category || formData.categories[0] || getDefaultCategory(),
       image: formData.images[0],
       file: formData.files[0],
     };
@@ -301,16 +384,22 @@ export default function MarketingScreen() {
 
   const getFirstImage = (item: MarketingItem) => item.images?.[0] || item.image;
 
+  const getPrimaryCategory = (item: MarketingItem) => {
+    if (item.category && item.category.trim()) return item.category;
+    if (Array.isArray(item.categories) && item.categories.length > 0) return item.categories[0];
+    return '';
+  };
+
   const filteredItems = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
 
     return items.filter(item => {
       const matchesSearch =
         !query ||
-        item.name.toLowerCase().includes(query) ||
-        item.description.toLowerCase().includes(query) ||
-        item.instructions.toLowerCase().includes(query) ||
-        item.toolLink.toLowerCase().includes(query);
+        (item.name || '').toLowerCase().includes(query) ||
+        (item.description || '').toLowerCase().includes(query) ||
+        (item.instructions || '').toLowerCase().includes(query) ||
+        (item.toolLink || '').toLowerCase().includes(query);
 
       const matchesFilter =
         activeFilter === 'All' ||
@@ -323,9 +412,9 @@ export default function MarketingScreen() {
   const displayedItems = useMemo(() => {
     const sorted = [...filteredItems];
     if (activeSort === 'name') {
-      sorted.sort((a, b) => a.name.localeCompare(b.name));
+      sorted.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     } else if (activeSort === 'category') {
-      sorted.sort((a, b) => a.category.localeCompare(b.category));
+      sorted.sort((a, b) => getPrimaryCategory(a).localeCompare(getPrimaryCategory(b)));
     } else {
       sorted.sort((a, b) => b.createdAt - a.createdAt);
     }
@@ -335,7 +424,7 @@ export default function MarketingScreen() {
   const uniqueCategories = [
     'All',
     'Favorites',
-    ...new Set([...categories, ...items.map(item => item.category).filter(Boolean)]),
+    ...new Set([...categories, ...items.map((item) => getPrimaryCategory(item)).filter(Boolean)]),
   ];
   const isFavoritesOnly = activeFilter === 'Favorites';
 
@@ -451,7 +540,7 @@ export default function MarketingScreen() {
                 styles.galleryCard,
                 { width: galleryCardWidth, backgroundColor: colors.card, borderColor: colors.border },
               ]}
-              onPress={() => openEditModal(item)}
+              onPress={() => openDetailsModal(item)}
               activeOpacity={0.85}
             >
               <TouchableOpacity
@@ -467,7 +556,7 @@ export default function MarketingScreen() {
                 />
               </TouchableOpacity>
               {getImageUri(getFirstImage(item)) ? (
-                <Image source={{ uri: getImageUri(getFirstImage(item)) as string }} style={styles.galleryImage} resizeMode="cover" />
+                <Image source={{ uri: getImageUri(getFirstImage(item)) as string }} style={styles.galleryImage} resizeMode="contain" />
               ) : (
                 <View style={[styles.galleryPlaceholder, { backgroundColor: colors.surface }]}>
                   <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
@@ -522,6 +611,71 @@ export default function MarketingScreen() {
           ))}
         </ScrollView>
       )}
+
+      <Modal visible={detailsVisible} animationType="slide" presentationStyle="pageSheet">
+        <SafeAreaView style={[styles.modalContainer, { backgroundColor: colors.background }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+            <TouchableOpacity onPress={() => setDetailsVisible(false)}>
+              <Text style={[styles.cancelText, { color: colors.textSecondary }]}>Close</Text>
+            </TouchableOpacity>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Marketing Details</Text>
+            <TouchableOpacity
+              onPress={() => {
+                if (!selectedItem) return;
+                setDetailsVisible(false);
+                openEditModal(selectedItem);
+              }}
+            >
+              <Text style={[styles.saveText, { color: colors.primary }]}>Edit</Text>
+            </TouchableOpacity>
+          </View>
+
+          {selectedItem && (
+            <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
+              <Text style={[styles.detailsTitleText, { color: colors.text }]}>{selectedItem.name}</Text>
+
+              {!!getImageUri(getFirstImage(selectedItem)) && (
+                <Image
+                  source={{ uri: getImageUri(getFirstImage(selectedItem)) as string }}
+                  style={[styles.detailsImage, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  resizeMode="contain"
+                />
+              )}
+
+              <View style={styles.metaTagsWrap}>
+                {(selectedItem.categories || (selectedItem.category ? [selectedItem.category] : [])).map((tag, index) => (
+                  <View key={`${tag}-${index}`} style={[styles.metaTag, { backgroundColor: colors.primary + '20' }]}>
+                    <Text style={[styles.metaTagText, { color: colors.primary }]}>{tag}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {!!selectedItem.description?.trim() && (
+                <>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Description</Text>
+                  <Text style={[styles.detailsBodyText, { color: colors.text }]}>{selectedItem.description}</Text>
+                </>
+              )}
+
+              {!!selectedItem.instructions?.trim() && (
+                <>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Instructions</Text>
+                  <Text style={[styles.detailsBodyText, { color: colors.text }]}>{selectedItem.instructions}</Text>
+                </>
+              )}
+
+              {!!selectedItem.toolLink?.trim() && (
+                <>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Tool Link</Text>
+                  <Text style={[styles.detailsBodyText, { color: colors.primary }]}>{selectedItem.toolLink}</Text>
+                </>
+              )}
+
+              <View style={styles.bottomPadding} />
+            </ScrollView>
+          )}
+        </SafeAreaView>
+      </Modal>
 
       <Modal visible={filterModalVisible} transparent animationType="fade">
         <View style={styles.overlay}>
@@ -616,7 +770,15 @@ export default function MarketingScreen() {
               label="Category"
               options={categories}
               value={formData.category}
-              onChange={(category) => setFormData({ ...formData, category })}
+              onChange={(category) =>
+                setFormData({
+                  ...formData,
+                  category,
+                  categories: formData.categories.includes(category)
+                    ? formData.categories
+                    : [category, ...formData.categories],
+                })
+              }
             />
             <TouchableOpacity
               style={[styles.manageCategoriesButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
@@ -635,12 +797,6 @@ export default function MarketingScreen() {
               style={styles.textArea}
             />
 
-            <MultiSelect
-              label="Categories"
-              options={categories}
-              selectedValues={formData.categories}
-              onSelect={(categories) => setFormData({ ...formData, categories })}
-            />
 
             <View style={styles.imageSection}>
               <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>Upload Image</Text>
@@ -717,7 +873,26 @@ export default function MarketingScreen() {
               />
               <TouchableOpacity
                 style={[styles.categoryActionButton, { backgroundColor: colors.primary }]}
-                onPress={addCategory}
+                onPress={async () => {
+                  const value = normalizeCategory(newCategoryName);
+                  if (!value) {
+                    Alert.alert('Error', 'Category name cannot be empty');
+                    return;
+                  }
+                  if (categories.some((category) => category.toLowerCase() === value.toLowerCase())) {
+                    Alert.alert('Error', 'Category already exists');
+                    return;
+                  }
+
+                  const updatedCategories = [...categories, value].sort((a, b) => {
+                    if (a.toLowerCase() === 'other') return 1;
+                    if (b.toLowerCase() === 'other') return -1;
+                    return a.localeCompare(b, undefined, { sensitivity: 'base' });
+                  });
+                  await marketingCategoryStorage.saveAll(updatedCategories);
+                  setCategories(updatedCategories);
+                  setNewCategoryName('');
+                }}
               >
                 <Ionicons name="add" size={16} color="#FFFFFF" />
               </TouchableOpacity>
@@ -1146,5 +1321,28 @@ const styles = StyleSheet.create({
   },
   bottomPadding: {
     height: 40,
+  },
+  detailsTitleText: {
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  detailsLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  detailsBodyText: {
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  detailsImage: {
+    width: '100%',
+    height: 220,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 10,
   },
 });
