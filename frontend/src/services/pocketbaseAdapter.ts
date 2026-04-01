@@ -25,10 +25,13 @@ const KEY_TO_KIND: Record<string, string> = {
 const CATEGORY_KEY_TO_KIND: Record<string, string> = {
   ai_stack_categories: 'ai_stack',
   prompt_categories: 'prompts',
+  tools_categories: 'tools',
+  tutorial_categories: 'tutorials',
   open_source_categories: 'open_source',
   lead_generation_categories: 'lead_generation',
   business_categories: 'business',
   content_creation_categories: 'content_creation',
+  website_categories: 'website',
   website_CATEGORIES: 'website',
   marketing_categories: 'marketing',
 };

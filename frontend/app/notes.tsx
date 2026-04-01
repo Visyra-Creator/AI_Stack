@@ -17,13 +17,12 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/src/context/ThemeContext';
 import { notesStorage, noteSectionsStorage, NoteItem as Note, NoteSection as Section } from '@/src/services/storage';
+import { CLOUD_SYNC_ENABLED } from '@/src/config/runtime';
 
 export default function NotesScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const cloudSyncEnabled =
-    process.env.EXPO_PUBLIC_USE_POCKETBASE === 'true' &&
-    !!process.env.EXPO_PUBLIC_POCKETBASE_URL;
+  const cloudSyncEnabled = CLOUD_SYNC_ENABLED;
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
   const [sections, setSections] = useState<Section[]>([]);

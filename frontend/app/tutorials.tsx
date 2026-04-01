@@ -12,6 +12,7 @@ import {
   RefreshControl,
   TextInput,
   FlatList,
+  Image,
   useWindowDimensions,
   GestureResponderEvent,
   Linking,
@@ -24,11 +25,15 @@ import { useTheme } from '@/src/context/ThemeContext';
 import { Card } from '@/src/components/common/Card';
 import { FormInput } from '@/src/components/common/FormInput';
 import { Button } from '@/src/components/common/Button';
+import { ImagePicker } from '@/src/components/common/ImagePicker';
+import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { tutorialsStorage, TutorialItem, tutorialsCategoryStorage } from '@/src/services/storage';
 import { MultiSelect } from '@/src/components/common/MultiSelect';
 import { PDFViewer } from '@/src/components/common/PDFViewer';
 import { openUriExternally } from '@/src/services/fileOpener';
+import { getImageUris, getPrimaryImageUri as getResolvedPrimaryImageUri } from '@/src/services/imageResolver';
+import { CLOUD_SYNC_ENABLED } from '@/src/config/runtime';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -41,9 +46,7 @@ type ViewMode = 'normal' | 'gallery';
 export default function TutorialsScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const cloudSyncEnabled =
-    process.env.EXPO_PUBLIC_USE_POCKETBASE === 'true' &&
-    !!process.env.EXPO_PUBLIC_POCKETBASE_URL;
+  const cloudSyncEnabled = CLOUD_SYNC_ENABLED;
   const { width: windowWidth } = useWindowDimensions();
   const galleryColumns = 4;
   const gap = 1;
@@ -101,6 +104,8 @@ export default function TutorialsScreen() {
     instructions: '',
     videoLink: '',
     categories: [] as string[],
+    image: undefined as string | undefined,
+    images: [] as string[],
     files: [] as string[],
   });
 
@@ -268,6 +273,8 @@ export default function TutorialsScreen() {
       instructions: '',
       videoLink: '',
       categories: [],
+      image: undefined,
+      images: [],
       files: [],
     });
     setEditingItem(null);
@@ -279,6 +286,7 @@ export default function TutorialsScreen() {
   };
 
   const openEditModal = (item: TutorialItem) => {
+    const imageUris = getImageUris(item);
     setEditingItem(item);
     setFormData({
       tutorialName: item.tutorialName,
@@ -286,6 +294,8 @@ export default function TutorialsScreen() {
       instructions: item.instructions,
       videoLink: item.videoLink || '',
       categories: item.categories || [],
+      image: imageUris[0],
+      images: imageUris,
       files: item.files || [],
     });
     setModalVisible(true);
@@ -308,10 +318,15 @@ export default function TutorialsScreen() {
       return;
     }
 
+    const normalizedFormData = {
+      ...formData,
+      image: formData.images[0],
+    };
+
     if (editingItem) {
-      await tutorialsStorage.update(editingItem.id, formData);
+      await tutorialsStorage.update(editingItem.id, normalizedFormData);
     } else {
-      await tutorialsStorage.add(formData);
+      await tutorialsStorage.add(normalizedFormData);
     }
 
     await loadItems();
@@ -356,7 +371,7 @@ export default function TutorialsScreen() {
         for (const asset of result.assets) {
           newFiles.push(JSON.stringify({ name: asset.name, uri: asset.uri, size: asset.size }));
         }
-        setFormData({ ...formData, files: [...formData.files, ...newFiles] });
+        setFormData((prev) => ({ ...prev, files: [...prev.files, ...newFiles] }));
       }
     } catch (error) {
       console.log('Error picking files:', error);
@@ -364,9 +379,12 @@ export default function TutorialsScreen() {
   };
 
   const removeFile = (index: number) => {
-    const newFiles = formData.files.filter((_, i) => i !== index);
-    setFormData({ ...formData, files: newFiles });
+    setFormData((prev) => ({
+      ...prev,
+      files: prev.files.filter((_, i) => i !== index),
+    }));
   };
+
 
   const getFileName = (fileStr: string): string => {
     try {
@@ -415,8 +433,8 @@ export default function TutorialsScreen() {
       } else if (uri.startsWith('http://') || uri.startsWith('https://')) {
         await openExternalLink(uri);
       } else {
-        const opened = await openUriExternally(uri);
-        if (!opened) {
+        const result = await openUriExternally(uri);
+        if (!result.success) {
           Alert.alert('Unable to open file', 'No app is available to open this file.');
         }
       }
@@ -451,6 +469,12 @@ export default function TutorialsScreen() {
     if (!raw) return '';
     return raw.split('\n')[0].trim();
   };
+
+  const getTutorialThumbnailUri = (item: TutorialItem): string | undefined => {
+    return getResolvedPrimaryImageUri(item);
+  };
+
+  const selectedImageUris = selectedItem ? getImageUris(selectedItem) : [];
 
   const filteredItems = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
@@ -652,6 +676,14 @@ export default function TutorialsScreen() {
                     </Text>
                   </View>
                 )}
+                {getImageUris(item).length > 0 && (
+                  <View style={[styles.badge, { backgroundColor: colors.warning + '20' }]}>
+                    <Ionicons name="image" size={14} color={colors.warning} />
+                    <Text style={[styles.badgeText, { color: colors.warning }]}>
+                      {getImageUris(item).length} image(s)
+                    </Text>
+                  </View>
+                )}
               </View>
             </Card>
           ))}
@@ -687,20 +719,24 @@ export default function TutorialsScreen() {
                   color={(item.isFavorite ?? false) ? '#FF6B6B' : '#FFFFFF'}
                 />
               </TouchableOpacity>
-              <View style={[styles.galleryPlaceholder, { backgroundColor: colors.surface }]}>
-                <Ionicons name="play-circle-outline" size={24} color={colors.textSecondary} />
-                <Text style={[styles.galleryPlaceholderText, { color: colors.textSecondary }]}>No image</Text>
-                <TouchableOpacity
-                  style={[styles.galleryAddImageCta, { backgroundColor: colors.background + 'D9' }]}
-                  onPress={(event) => {
-                    event.stopPropagation();
-                    openEditModal(item);
-                  }}
-                  activeOpacity={0.85}
-                >
-                  <Text style={[styles.galleryAddImageCtaText, { color: colors.text }]}>Add thumbnail</Text>
-                </TouchableOpacity>
-              </View>
+              {getTutorialThumbnailUri(item) ? (
+                <Image source={{ uri: getTutorialThumbnailUri(item) }} style={styles.galleryImage} resizeMode="cover" />
+              ) : (
+                <View style={[styles.galleryPlaceholder, { backgroundColor: colors.surface }]}>
+                  <Ionicons name="play-circle-outline" size={24} color={colors.textSecondary} />
+                  <Text style={[styles.galleryPlaceholderText, { color: colors.textSecondary }]}>No image</Text>
+                  <TouchableOpacity
+                    style={[styles.galleryAddImageCta, { backgroundColor: colors.background + 'D9' }]}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      openEditModal(item);
+                    }}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[styles.galleryAddImageCtaText, { color: colors.text }]}>Add thumbnail</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
               <View style={styles.galleryOverlay}>
                 <Text style={styles.galleryTitle} numberOfLines={1}>{item.tutorialName}</Text>
                 <Text style={styles.gallerySubtitle} numberOfLines={1}>{getTutorialPreviewLine(item)}</Text>
@@ -732,13 +768,13 @@ export default function TutorialsScreen() {
               label="Tutorial Name *"
               placeholder="e.g., Midjourney Basics"
               value={formData.tutorialName}
-              onChangeText={(text) => setFormData({ ...formData, tutorialName: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, tutorialName: text }))}
             />
             <FormInput
               label="Description"
               placeholder="What will you learn?"
               value={formData.description}
-              onChangeText={(text) => setFormData({ ...formData, description: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, description: text }))}
               multiline
               numberOfLines={3}
               style={styles.textArea}
@@ -747,7 +783,7 @@ export default function TutorialsScreen() {
               label="Instructions"
               placeholder="Step-by-step instructions..."
               value={formData.instructions}
-              onChangeText={(text) => setFormData({ ...formData, instructions: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, instructions: text }))}
               multiline
               numberOfLines={5}
               style={styles.textArea}
@@ -756,7 +792,7 @@ export default function TutorialsScreen() {
               label="Video Link"
               placeholder="YouTube, Vimeo, or other video URL"
               value={formData.videoLink}
-              onChangeText={(text) => setFormData({ ...formData, videoLink: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, videoLink: text }))}
               keyboardType="url"
               autoCapitalize="none"
             />
@@ -765,7 +801,7 @@ export default function TutorialsScreen() {
               label="Categories"
               options={categories}
               selectedValues={formData.categories}
-              onSelect={(categories) => setFormData({ ...formData, categories })}
+              onSelect={(categories) => setFormData((prev) => ({ ...prev, categories }))}
             />
 
             <TouchableOpacity
@@ -775,6 +811,16 @@ export default function TutorialsScreen() {
               <Ionicons name="settings-outline" size={16} color={colors.textSecondary} />
               <Text style={[styles.manageCategoriesText, { color: colors.text }]}>Manage Categories</Text>
             </TouchableOpacity>
+
+            <View style={styles.imageSection}>
+              <ImagePicker
+                label="Thumbnail Images"
+                multiple
+                values={formData.images}
+                onChange={() => undefined}
+                onChangeValues={(images) => setFormData((prev) => ({ ...prev, images, image: images[0] }))}
+              />
+            </View>
 
             <View style={styles.filesSection}>
               <Text style={[styles.filesLabel, { color: colors.textSecondary }]}>Files</Text>
@@ -863,6 +909,23 @@ export default function TutorialsScreen() {
                         <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
                       </TouchableOpacity>
                     ))}
+                  </View>
+                )}
+
+                {selectedImageUris.length > 0 && (
+                  <View style={styles.detailsSection}>
+                    <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Images</Text>
+                    <Text style={[styles.detailsImageHint, { color: colors.textSecondary }]}>Double tap an image to view full screen</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.detailsImagesRow}>
+                      {selectedImageUris.map((uri, index) => (
+                        <DoubleTapImage
+                          key={`${uri}-${index}`}
+                          uri={uri}
+                          style={styles.detailsImagePreview}
+                          resizeMode="contain"
+                        />
+                      ))}
+                    </ScrollView>
                   </View>
                 )}
 
@@ -1165,6 +1228,10 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     overflow: 'hidden',
   },
+  galleryImage: {
+    width: '100%',
+    height: '100%',
+  },
   galleryPlaceholder: {
     width: '100%',
     height: '100%',
@@ -1254,6 +1321,11 @@ const styles = StyleSheet.create({
   detailsSection: {
     marginBottom: 14,
   },
+  detailsImageHint: {
+    fontSize: 11,
+    marginBottom: 8,
+    opacity: 0.75,
+  },
   detailsLabel: {
     fontSize: 12,
     fontWeight: '600',
@@ -1290,6 +1362,9 @@ const styles = StyleSheet.create({
   filesSection: {
     marginBottom: 16,
   },
+  imageSection: {
+    marginBottom: 16,
+  },
   filesLabel: {
     fontSize: 14,
     fontWeight: '500',
@@ -1307,6 +1382,16 @@ const styles = StyleSheet.create({
   fileName: {
     flex: 1,
     fontSize: 14,
+  },
+  detailsImagesRow: {
+    gap: 8,
+    paddingRight: 8,
+  },
+  detailsImagePreview: {
+    width: 88,
+    height: 88,
+    borderRadius: 10,
+    backgroundColor: '#0F172A22',
   },
   overlay: {
     flex: 1,

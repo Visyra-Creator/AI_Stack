@@ -15,6 +15,7 @@ const STORAGE_KEYS = {
   PROMPTS: 'prompts',
   PROMPT_CATEGORIES: 'prompt_categories',
   TOOLS: 'tools',
+  TOOLS_CATEGORIES: 'tools_categories',
   TUTORIALS: 'tutorials',
   TUTORIAL_CATEGORIES: 'tutorial_categories',
   OPEN_SOURCE: 'open_source',
@@ -148,6 +149,8 @@ export interface TutorialItem {
   videoLink?: string;
   categories?: string[];
   files: string[];
+  image?: string;
+  images?: string[];
   isFavorite?: boolean;
   createdAt: number;
   updatedAt?: number;
@@ -298,7 +301,14 @@ function mergeByIdAndRecency<T extends { id?: string; updatedAt?: number; create
 
     const existingTs = existing.updatedAt ?? existing.createdAt ?? 0;
     const incomingTs = item.updatedAt ?? item.createdAt ?? 0;
-    if (incomingTs >= existingTs) {
+    const existingAny = existing as any;
+    const incomingAny = item as any;
+
+    // Keep the richer local copy when timestamps tie, especially when remote payloads were sync-truncated.
+    if (incomingTs > existingTs) {
+      if (incomingAny?.syncTruncated && !existingAny?.syncTruncated) {
+        continue;
+      }
       mergedMap.set(item.id, item);
     }
   }
@@ -335,12 +345,31 @@ async function getItems<T>(key: string): Promise<T[]> {
         }
       }
 
+      const parsedLocalItems = Array.isArray(localItems) ? (localItems as any[]) : [];
+
+      if (parsedLocalItems.length > 0) {
+        // Fast path: render local data immediately, then sync remote in background.
+        void (async () => {
+          try {
+            const remoteItems = await getPocketBaseItems<T>(key);
+            if (remoteItems.length === 0) {
+              await savePocketBaseItems<T>(key, parsedLocalItems as T[]);
+              return;
+            }
+
+            const merged = mergeByIdAndRecency(parsedLocalItems, remoteItems as any[]) as T[];
+            await AsyncStorage.setItem(key, JSON.stringify(merged));
+          } catch {
+            // Keep local-first behavior: background sync failures should not break initial render.
+          }
+        })();
+
+        return parsedLocalItems as T[];
+      }
+
       try {
         const remoteItems = await getPocketBaseItems<T>(key);
         if (remoteItems.length === 0) {
-          if (Array.isArray(localItems) && localItems.length > 0) {
-            await savePocketBaseItems<T>(key, localItems);
-          }
           return localItems;
         }
 
@@ -476,15 +505,15 @@ export const toolStorage = {
 
 export const toolCategoryStorage = {
   getAll: async (): Promise<string[]> => {
-    const categories = await getItems<string>(STORAGE_KEYS.TOOLS + '_CATEGORIES');
+    const categories = await getItems<string>(STORAGE_KEYS.TOOLS_CATEGORIES);
     if (categories.length === 0) {
       const defaultCategories = ['AI Tool', 'Productivity', 'Design', 'Development', 'Marketing', 'Other'];
-      await saveItems(STORAGE_KEYS.TOOLS + '_CATEGORIES', defaultCategories);
+      await saveItems(STORAGE_KEYS.TOOLS_CATEGORIES, defaultCategories);
       return defaultCategories;
     }
     return categories;
   },
-  saveAll: (categories: string[]) => saveItems(STORAGE_KEYS.TOOLS + '_CATEGORIES', categories),
+  saveAll: (categories: string[]) => saveItems(STORAGE_KEYS.TOOLS_CATEGORIES, categories),
 };
 
 // Tutorials
@@ -599,15 +628,15 @@ export const websiteStorage = {
 
 export const websiteCategoryStorage = {
   getAll: async (): Promise<string[]> => {
-    const categories = await getItems<string>(STORAGE_KEYS.WEBSITE + '_CATEGORIES');
+    const categories = await getItems<string>(STORAGE_KEYS.WEBSITE_CATEGORIES);
     if (categories.length === 0) {
       const defaultCategories = ['AI Tool', 'Productivity', 'Design', 'Development', 'Marketing', 'Social Media', 'Analytics', 'Communication', 'Finance', 'Other'];
-      await saveItems(STORAGE_KEYS.WEBSITE + '_CATEGORIES', defaultCategories);
+      await saveItems(STORAGE_KEYS.WEBSITE_CATEGORIES, defaultCategories);
       return defaultCategories;
     }
     return categories;
   },
-  saveAll: (categories: string[]) => saveItems(STORAGE_KEYS.WEBSITE + '_CATEGORIES', categories),
+  saveAll: (categories: string[]) => saveItems(STORAGE_KEYS.WEBSITE_CATEGORIES, categories),
 };
 
 // Marketing
@@ -647,7 +676,6 @@ export const dashboardStorage = {
 
 const APP_STORAGE_KEYS = [
   ...Object.values(STORAGE_KEYS),
-  `${STORAGE_KEYS.WEBSITE}_CATEGORIES`,
 ];
 
 type AppBackupPayload = {

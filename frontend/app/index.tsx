@@ -18,6 +18,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/src/context/ThemeContext';
 import { dashboardStorage } from '@/src/services/storage';
+import { CLOUD_SYNC_ENABLED } from '@/src/config/runtime';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -103,9 +104,7 @@ const menuSections: MenuSection[] = [
 export default function HomeScreen() {
   const router = useRouter();
   const { colors, mode, toggleTheme } = useTheme();
-  const cloudSyncEnabled =
-    process.env.EXPO_PUBLIC_USE_POCKETBASE === 'true' &&
-    !!process.env.EXPO_PUBLIC_POCKETBASE_URL;
+  const cloudSyncEnabled = CLOUD_SYNC_ENABLED;
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [isManualSyncing, setIsManualSyncing] = useState(false);
   const [isMenuVisible, setIsMenuVisible] = useState(false);

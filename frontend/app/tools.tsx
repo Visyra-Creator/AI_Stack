@@ -20,14 +20,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as ExpoImagePicker from 'expo-image-picker';
 import { useTheme } from '@/src/context/ThemeContext';
 import { Card } from '@/src/components/common/Card';
 import { FormInput } from '@/src/components/common/FormInput';
-import { ImagePicker } from '@/src/components/common/ImagePicker';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { toolStorage, ToolItem, toolCategoryStorage } from '@/src/services/storage';
 import { MultiSelect } from '@/src/components/common/MultiSelect';
+import { getImageUris, getPrimaryImageUri as getResolvedPrimaryImageUri } from '@/src/services/imageResolver';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -218,7 +219,12 @@ export default function ToolsScreen() {
     setModalVisible(true);
   };
 
+  const getToolThumbnailUri = (item: ToolItem): string | undefined => {
+    return getResolvedPrimaryImageUri(item);
+  };
+
   const openEditModal = (item: ToolItem) => {
+    const imageUris = getImageUris(item);
     setEditingItem(item);
     setFormData({
       toolName: item.toolName,
@@ -226,8 +232,8 @@ export default function ToolsScreen() {
       description: item.description,
       instructions: item.instructions,
       categories: item.categories || [],
-      image: item.image,
-      images: item.images || [],
+      image: imageUris[0],
+      images: imageUris,
     });
     setModalVisible(true);
   };
@@ -249,10 +255,15 @@ export default function ToolsScreen() {
       return;
     }
 
+    const normalizedFormData = {
+      ...formData,
+      image: formData.images[0],
+    };
+
     if (editingItem) {
-      await toolStorage.update(editingItem.id, formData);
+      await toolStorage.update(editingItem.id, normalizedFormData);
     } else {
-      await toolStorage.add(formData);
+      await toolStorage.add(normalizedFormData);
     }
 
     await loadItems();
@@ -283,6 +294,51 @@ export default function ToolsScreen() {
   const onFavoritePress = (event: GestureResponderEvent, item: ToolItem) => {
     event.stopPropagation();
     toggleFavorite(item);
+  };
+
+  const pickImages = async () => {
+    try {
+      const permission = await ExpoImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission required', 'Please allow photo library access to upload images.');
+        return;
+      }
+
+      const result = await ExpoImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets.length > 0) {
+        const picked = result.assets
+          .map((asset) => asset.uri)
+          .filter((uri): uri is string => !!uri);
+        if (picked.length === 0) return;
+
+        setFormData((prev) => {
+          const merged = Array.from(new Set([...(prev.images || []), ...picked]));
+          return {
+            ...prev,
+            images: merged,
+            image: merged[0],
+          };
+        });
+      }
+    } catch {
+      Alert.alert('Unable to pick image', 'Something went wrong while selecting images.');
+    }
+  };
+
+  const removeImageAt = (index: number) => {
+    setFormData((prev) => {
+      const next = (prev.images || []).filter((_, i) => i !== index);
+      return {
+        ...prev,
+        images: next,
+        image: next[0],
+      };
+    });
   };
 
   const getToolPreviewLine = (item: ToolItem) => {
@@ -374,6 +430,8 @@ export default function ToolsScreen() {
     setActiveSort('recent');
     setViewMode('normal');
   };
+
+  const selectedImageUris = selectedItem ? getImageUris(selectedItem) : [];
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -520,8 +578,8 @@ export default function ToolsScreen() {
                   color={(item.isFavorite ?? false) ? '#FF6B6B' : '#FFFFFF'}
                 />
               </TouchableOpacity>
-              {(item.images?.[0] || item.image) ? (
-                <Image source={{ uri: item.images?.[0] || item.image }} style={styles.galleryImage} resizeMode="cover" />
+              {getToolThumbnailUri(item) ? (
+                <Image source={{ uri: getToolThumbnailUri(item) }} style={styles.galleryImage} resizeMode="cover" />
               ) : (
                 <View style={[styles.galleryPlaceholder, { backgroundColor: colors.surface }]}>
                   <Ionicons name="construct-outline" size={24} color={colors.textSecondary} />
@@ -569,13 +627,13 @@ export default function ToolsScreen() {
               label="Tool Name *"
               placeholder="e.g., Prompt Generator"
               value={formData.toolName}
-              onChangeText={(text) => setFormData({ ...formData, toolName: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, toolName: text }))}
             />
             <FormInput
               label="Link"
               placeholder="https://..."
               value={formData.link}
-              onChangeText={(text) => setFormData({ ...formData, link: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, link: text }))}
               keyboardType="url"
               autoCapitalize="none"
             />
@@ -583,7 +641,7 @@ export default function ToolsScreen() {
               label="Description"
               placeholder="What does this tool do?"
               value={formData.description}
-              onChangeText={(text) => setFormData({ ...formData, description: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, description: text }))}
               multiline
               numberOfLines={3}
               style={styles.textArea}
@@ -592,7 +650,7 @@ export default function ToolsScreen() {
               label="Instructions"
               placeholder="Step-by-step instructions..."
               value={formData.instructions}
-              onChangeText={(text) => setFormData({ ...formData, instructions: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, instructions: text }))}
               multiline
               numberOfLines={5}
               style={styles.textArea}
@@ -602,7 +660,7 @@ export default function ToolsScreen() {
               label="Categories"
               options={categories}
               selectedValues={formData.categories}
-              onSelect={(categories) => setFormData({ ...formData, categories })}
+              onSelect={(categories) => setFormData((prev) => ({ ...prev, categories }))}
             />
 
             <TouchableOpacity
@@ -613,14 +671,31 @@ export default function ToolsScreen() {
               <Text style={[styles.manageCategoriesText, { color: colors.text }]}>Manage Categories</Text>
             </TouchableOpacity>
 
-            <View style={styles.imageSection}>
-              <ImagePicker
-                label="Tool Image"
-                multiple
-                values={formData.images}
-                onChange={() => undefined}
-                onChangeValues={(images) => setFormData({ ...formData, images, image: images[0] })}
-              />
+            <View style={styles.uploadSection}>
+              <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>Upload Images</Text>
+              <TouchableOpacity
+                style={[styles.uploadButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={pickImages}
+              >
+                <Ionicons name="image-outline" size={18} color={colors.textSecondary} />
+                <Text style={[styles.uploadButtonText, { color: colors.text }]}>Add Images</Text>
+              </TouchableOpacity>
+
+              {formData.images.length > 0 && (
+                <View style={styles.imageGrid}>
+                  {formData.images.map((uri, index) => (
+                    <View key={`${uri}-${index}`} style={styles.imageItem}>
+                      <Image source={{ uri }} style={styles.imagePreview} resizeMode="cover" />
+                      <TouchableOpacity
+                        style={[styles.imageRemoveButton, { backgroundColor: colors.background }]}
+                        onPress={() => removeImageAt(index)}
+                      >
+                        <Ionicons name="close-circle" size={18} color={colors.danger} />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
             </View>
 
             <View style={styles.bottomPadding} />
@@ -670,15 +745,20 @@ export default function ToolsScreen() {
                 </View>
               )}
 
-              {!!(selectedItem.images?.[0] || selectedItem.image) && (
+              {selectedImageUris.length > 0 && (
                 <View style={styles.detailsSection}>
-                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Image</Text>
-                  <Text style={[styles.detailsImageHint, { color: colors.textSecondary }]}>Double tap the image to view full screen</Text>
-                  <DoubleTapImage
-                    uri={selectedItem.images?.[0] || selectedItem.image || ''}
-                    style={styles.detailsImage}
-                    resizeMode="cover"
-                  />
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Images</Text>
+                  <Text style={[styles.detailsImageHint, { color: colors.textSecondary }]}>Double tap an image to view full screen</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.detailsImagesRow}>
+                    {selectedImageUris.map((uri, index) => (
+                      <DoubleTapImage
+                        key={`${uri}-${index}`}
+                        uri={uri}
+                        style={styles.detailsImagePreview}
+                        resizeMode="cover"
+                      />
+                    ))}
+                  </ScrollView>
                 </View>
               )}
 
@@ -1031,6 +1111,61 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginTop: 4,
     alignSelf: 'flex-start',
+  },
+  detailsImagesRow: {
+    gap: 8,
+    paddingRight: 8,
+  },
+  detailsImagePreview: {
+    width: 88,
+    height: 88,
+    borderRadius: 10,
+    backgroundColor: '#0F172A22',
+  },
+  uploadSection: {
+    marginBottom: 16,
+  },
+  uploadLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 6,
+  },
+  uploadButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  uploadButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  imageGrid: {
+    marginTop: 10,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  imageItem: {
+    width: 84,
+    height: 84,
+    borderRadius: 10,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  imagePreview: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#0F172A22',
+  },
+  imageRemoveButton: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    borderRadius: 10,
   },
   textArea: {
     minHeight: 100,

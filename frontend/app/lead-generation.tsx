@@ -31,6 +31,7 @@ import { leadGenerationStorage, leadGenerationCategoryStorage, LeadGenerationIte
 import { MultiSelect } from '@/src/components/common/MultiSelect';
 import { PDFViewer } from '@/src/components/common/PDFViewer';
 import { openUriExternally } from '@/src/services/fileOpener';
+import { resolveImageUri, getPrimaryImageUri as getResolvedPrimaryImageUri } from '@/src/services/imageResolver';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -364,15 +365,6 @@ export default function LeadGenerationScreen() {
     }));
   };
 
-  const getImageUri = (imageStr: string) => {
-    try {
-      const parsed = JSON.parse(imageStr);
-      return parsed.uri as string | undefined;
-    } catch {
-      return undefined;
-    }
-  };
-
   const getFileName = (fileStr: string) => {
     try {
       const parsed = JSON.parse(fileStr);
@@ -407,8 +399,8 @@ export default function LeadGenerationScreen() {
       } else if (uri.startsWith('http://') || uri.startsWith('https://')) {
         await openExternalLink(uri);
       } else {
-        const opened = await openUriExternally(uri);
-        if (!opened) {
+        const result = await openUriExternally(uri);
+        if (!result.success) {
           Alert.alert('Unable to open file', 'No app available to open this file.');
         }
       }
@@ -497,8 +489,7 @@ export default function LeadGenerationScreen() {
   };
 
   const getPrimaryImageUri = (item: LeadGenerationItem) => {
-    if (!item.images || item.images.length === 0) return undefined;
-    return getImageUri(item.images[0]);
+    return getResolvedPrimaryImageUri(item);
   };
 
   return (
@@ -761,7 +752,7 @@ export default function LeadGenerationScreen() {
                     <Text style={[styles.detailsImageHint, { color: colors.textSecondary }]}>Double tap an image to view full screen</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.detailsImagesRow}>
                       {selectedItem.images.map((image, index) => {
-                        const uri = getImageUri(image);
+                        const uri = resolveImageUri(image);
                         if (!uri) return null;
                         return (
                           <DoubleTapImage
@@ -803,13 +794,13 @@ export default function LeadGenerationScreen() {
               label="Name *"
               placeholder="e.g., LinkedIn Sales Navigator"
               value={formData.name}
-              onChangeText={(text) => setFormData({ ...formData, name: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, name: text }))}
             />
             <FormInput
               label="Description"
               placeholder="What does this tool do?"
               value={formData.description}
-              onChangeText={(text) => setFormData({ ...formData, description: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, description: text }))}
               multiline
               numberOfLines={3}
               style={styles.textArea}
@@ -818,7 +809,7 @@ export default function LeadGenerationScreen() {
               label="Instructions"
               placeholder="How to use for lead generation..."
               value={formData.instructions}
-              onChangeText={(text) => setFormData({ ...formData, instructions: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, instructions: text }))}
               multiline
               numberOfLines={4}
               style={styles.textArea}
@@ -827,7 +818,7 @@ export default function LeadGenerationScreen() {
               label="Link"
               placeholder="https://..."
               value={formData.link}
-              onChangeText={(text) => setFormData({ ...formData, link: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, link: text }))}
               keyboardType="url"
               autoCapitalize="none"
             />
@@ -835,7 +826,7 @@ export default function LeadGenerationScreen() {
               label="Video Link"
               placeholder="https://..."
               value={formData.videoLink}
-              onChangeText={(text) => setFormData({ ...formData, videoLink: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, videoLink: text }))}
               keyboardType="url"
               autoCapitalize="none"
             />
@@ -844,7 +835,7 @@ export default function LeadGenerationScreen() {
               label="Categories"
               options={categories}
               selectedValues={formData.categories}
-              onSelect={(categories) => setFormData({ ...formData, categories })}
+              onSelect={(categories) => setFormData((prev) => ({ ...prev, categories }))}
             />
 
             <TouchableOpacity
@@ -868,7 +859,7 @@ export default function LeadGenerationScreen() {
               {formData.images.length > 0 && (
                 <View style={styles.imageGrid}>
                   {formData.images.map((image, index) => {
-                    const uri = getImageUri(image);
+                    const uri = resolveImageUri(image);
                     if (!uri) return null;
                     return (
                       <View key={`${image}-${index}`} style={styles.imageItem}>

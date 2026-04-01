@@ -31,6 +31,7 @@ import { EmptyState } from '@/src/components/common/EmptyState';
 import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { aiStackStorage, aiStackCategoryStorage, AIStackItem } from '@/src/services/storage';
 import { openUriExternally } from '@/src/services/fileOpener';
+import { resolveImageUri, getPrimaryImageUri as getResolvedPrimaryImageUri } from '@/src/services/imageResolver';
 
 const PRICING_OPTIONS = ['free', 'paid', 'freemium'];
 const SORT_OPTIONS = [
@@ -409,15 +410,6 @@ export default function AIStackScreen() {
     }
   };
 
-  const getImageUri = (imageStr: string) => {
-    try {
-      const parsed = JSON.parse(imageStr);
-      return parsed.uri as string | undefined;
-    } catch {
-      return undefined;
-    }
-  };
-
   const openFile = async (fileStr: string) => {
     const uri = getFileUri(fileStr);
     if (!uri) {
@@ -427,7 +419,7 @@ export default function AIStackScreen() {
 
     try {
       const opened = await openUriExternally(uri);
-      if (!opened) {
+      if (!opened.success) {
         Alert.alert('Unable to open file', 'No app available to open this file type.');
       }
     } catch {
@@ -540,8 +532,7 @@ export default function AIStackScreen() {
   };
 
   const getPrimaryImageUri = (item: AIStackItem) => {
-    if (!item.images || item.images.length === 0) return undefined;
-    return getImageUri(item.images[0]);
+    return getResolvedPrimaryImageUri(item);
   };
 
   return (
@@ -856,7 +847,7 @@ export default function AIStackScreen() {
                   <Text style={[styles.detailsImageHint, { color: colors.textSecondary }]}>Double tap an image to view full screen</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.detailsImagesRow}>
                     {selectedItem.images.map((image, index) => {
-                      const uri = getImageUri(image);
+                      const uri = resolveImageUri(image);
                       if (!uri) return null;
                       return (
                         <DoubleTapImage
@@ -905,13 +896,13 @@ export default function AIStackScreen() {
               label="Tool Name *"
               placeholder="e.g., ChatGPT, Midjourney"
               value={formData.toolName}
-              onChangeText={(text) => setFormData({ ...formData, toolName: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, toolName: text }))}
             />
             <FormInput
               label="URL"
               placeholder="https://..."
               value={formData.url}
-              onChangeText={(text) => setFormData({ ...formData, url: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, url: text }))}
               keyboardType="url"
               autoCapitalize="none"
             />
@@ -919,7 +910,7 @@ export default function AIStackScreen() {
               label="Categories"
               options={categories}
               selected={formData.categories}
-              onChange={(categories) => setFormData({ ...formData, categories })}
+              onChange={(categories) => setFormData((prev) => ({ ...prev, categories }))}
             />
             <TouchableOpacity
               style={[styles.manageCategoriesButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
@@ -932,7 +923,7 @@ export default function AIStackScreen() {
               label="Description"
               placeholder="Add a full description of this tool..."
               value={formData.description}
-              onChangeText={(text) => setFormData({ ...formData, description: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, description: text }))}
               multiline
               style={styles.textArea}
             />
@@ -940,7 +931,7 @@ export default function AIStackScreen() {
               label="What's It Used For"
               placeholder="Describe the main use case..."
               value={formData.usedFor}
-              onChangeText={(text) => setFormData({ ...formData, usedFor: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, usedFor: text }))}
               multiline
               numberOfLines={3}
               style={styles.textArea}
@@ -949,7 +940,7 @@ export default function AIStackScreen() {
               label="Key Features"
               placeholder="List the main features..."
               value={formData.keyFeatures}
-              onChangeText={(text) => setFormData({ ...formData, keyFeatures: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, keyFeatures: text }))}
               multiline
               numberOfLines={3}
               style={styles.textArea}
@@ -958,19 +949,19 @@ export default function AIStackScreen() {
               label="Pricing"
               options={PRICING_OPTIONS}
               value={formData.pricing}
-              onChange={(pricing) => setFormData({ ...formData, pricing: pricing as any })}
+              onChange={(pricing) => setFormData((prev) => ({ ...prev, pricing: pricing as any }))}
             />
             <FormInput
               label="Best For"
               placeholder="Who would benefit most..."
               value={formData.bestFor}
-              onChangeText={(text) => setFormData({ ...formData, bestFor: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, bestFor: text }))}
             />
             <FormInput
               label="Guides/Documents"
               placeholder="Links to guides, documentation..."
               value={formData.guides}
-              onChangeText={(text) => setFormData({ ...formData, guides: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, guides: text }))}
               multiline
               numberOfLines={3}
               style={styles.textArea}
@@ -988,7 +979,7 @@ export default function AIStackScreen() {
               {formData.images.length > 0 && (
                 <View style={styles.imageGrid}>
                   {formData.images.map((image, index) => {
-                    const uri = getImageUri(image);
+                    const uri = resolveImageUri(image);
                     if (!uri) return null;
                     return (
                       <View key={`${image}-${index}`} style={styles.imageItem}>
@@ -1042,7 +1033,7 @@ export default function AIStackScreen() {
               label="Instructions"
               placeholder="Personal notes, tips..."
               value={formData.instructions}
-              onChangeText={(text) => setFormData({ ...formData, instructions: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, instructions: text }))}
               multiline
               style={styles.textArea}
             />

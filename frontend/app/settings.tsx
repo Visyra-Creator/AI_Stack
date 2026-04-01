@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Share } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -7,11 +7,37 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as DocumentPicker from 'expo-document-picker';
 import { useTheme } from '@/src/context/ThemeContext';
 import {
+  dashboardStorage,
   exportAppBackup,
   importAppBackup,
   resetAllAppData,
   resetLocalAppData,
 } from '@/src/services/storage';
+import { hasPocketBaseMapping } from '@/src/services/pocketbaseAdapter';
+import { CLOUD_SYNC_ENABLED, POCKETBASE_URL_CONFIGURED } from '@/src/config/runtime';
+
+const SYNC_SECTIONS = [
+  { label: 'AI Stack', storageKey: 'ai_stack' },
+  { label: 'Prompts', storageKey: 'prompts' },
+  { label: 'Tools', storageKey: 'tools' },
+  { label: 'Tutorials', storageKey: 'tutorials' },
+  { label: 'Open Source', storageKey: 'open_source' },
+  { label: 'Lead Gen', storageKey: 'lead_generation' },
+  { label: 'Business', storageKey: 'business' },
+  { label: 'Content', storageKey: 'content_creation' },
+  { label: 'Website', storageKey: 'website' },
+  { label: 'Reference', storageKey: 'reference' },
+  { label: 'Marketing', storageKey: 'marketing' },
+  { label: 'Notes', storageKey: 'notes' },
+] as const;
+
+type SyncDiagnosticRow = {
+  label: string;
+  storageKey: string;
+  itemCount: number;
+  lastUpdated: number | null;
+  cloudMapped: boolean;
+};
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -20,6 +46,54 @@ export default function SettingsScreen() {
   const [resettingLocal, setResettingLocal] = useState(false);
   const [exportingBackup, setExportingBackup] = useState(false);
   const [importingBackup, setImportingBackup] = useState(false);
+  const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnosticRow[]>([]);
+  const [syncDiagnosticsLoading, setSyncDiagnosticsLoading] = useState(false);
+  const [syncDiagnosticsUpdatedAt, setSyncDiagnosticsUpdatedAt] = useState<number | null>(null);
+
+  const formatRelative = (timestamp: number) => {
+    const diffMs = Date.now() - timestamp;
+    const minutes = Math.floor(diffMs / 60000);
+    const hours = Math.floor(minutes / 60);
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+  };
+
+  const loadSyncDiagnostics = useCallback(async () => {
+    setSyncDiagnosticsLoading(true);
+    try {
+      const rows = await Promise.all(
+        SYNC_SECTIONS.map(async ({ label, storageKey }) => {
+          const items = await dashboardStorage.getByStorageKey<any>(storageKey);
+          const lastUpdated = items.reduce((latest: number, item: any) => {
+            const ts = item?.updatedAt ?? item?.createdAt ?? 0;
+            return ts > latest ? ts : latest;
+          }, 0);
+
+          return {
+            label,
+            storageKey,
+            itemCount: items.length,
+            lastUpdated: lastUpdated > 0 ? lastUpdated : null,
+            cloudMapped: hasPocketBaseMapping(storageKey),
+          } satisfies SyncDiagnosticRow;
+        })
+      );
+
+      setSyncDiagnostics(rows);
+      setSyncDiagnosticsUpdatedAt(Date.now());
+    } catch (error) {
+      console.error('Failed to load sync diagnostics:', error);
+      setSyncDiagnostics([]);
+    } finally {
+      setSyncDiagnosticsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSyncDiagnostics();
+  }, [loadSyncDiagnostics]);
 
   const handleResetAppData = () => {
     if (resetting) return;
@@ -188,6 +262,48 @@ export default function SettingsScreen() {
           <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
         </TouchableOpacity>
 
+        <View style={[styles.diagnosticsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.diagnosticsHeader}>
+            <View style={styles.settingLeft}>
+              <View style={[styles.iconWrap, { backgroundColor: colors.surface }]}>
+                <Ionicons name="cloud-done-outline" size={18} color={colors.text} />
+              </View>
+              <View>
+                <Text style={[styles.settingTitle, { color: colors.text }]}>Sync Diagnostics</Text>
+                <Text style={[styles.settingSubtitle, { color: colors.textSecondary }]}>Dev vs APK parity checks</Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[styles.refreshButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={loadSyncDiagnostics}
+              disabled={syncDiagnosticsLoading}
+            >
+              <Ionicons name={syncDiagnosticsLoading ? 'sync' : 'refresh'} size={16} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+
+          <Text style={[styles.diagnosticMeta, { color: colors.textSecondary }]}>Cloud enabled: {CLOUD_SYNC_ENABLED ? 'Yes' : 'No'}</Text>
+          <Text style={[styles.diagnosticMeta, { color: colors.textSecondary }]}>PocketBase URL configured: {POCKETBASE_URL_CONFIGURED ? 'Yes' : 'No'}</Text>
+          <Text style={[styles.diagnosticMeta, { color: colors.textSecondary }]}>Last diagnostics refresh: {syncDiagnosticsUpdatedAt ? formatRelative(syncDiagnosticsUpdatedAt) : 'pending'}</Text>
+
+          {syncDiagnostics.map((row) => (
+            <View key={row.storageKey} style={[styles.diagnosticRow, { borderTopColor: colors.border }]}>
+              <View style={styles.diagnosticLeft}>
+                <Text style={[styles.diagnosticSectionName, { color: colors.text }]}>{row.label}</Text>
+                <Text style={[styles.diagnosticSectionMeta, { color: colors.textSecondary }]}>Items: {row.itemCount} {row.lastUpdated ? `• Updated ${formatRelative(row.lastUpdated)}` : '• No local data yet'}</Text>
+              </View>
+              <Text
+                style={[
+                  styles.diagnosticStatus,
+                  { color: !CLOUD_SYNC_ENABLED ? colors.textSecondary : row.cloudMapped ? '#16A34A' : '#F59E0B' },
+                ]}
+              >
+                {!CLOUD_SYNC_ENABLED ? 'Local only' : row.cloudMapped ? 'Mapped' : 'Not mapped'}
+              </Text>
+            </View>
+          ))}
+        </View>
+
         <TouchableOpacity
           style={[styles.settingRow, { backgroundColor: colors.card, borderColor: colors.border }]}
           onPress={handleExportBackup}
@@ -332,6 +448,55 @@ const styles = StyleSheet.create({
   settingSubtitle: {
     fontSize: 12,
     marginTop: 2,
+  },
+  diagnosticsCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 12,
+  },
+  diagnosticsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  refreshButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  diagnosticMeta: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  diagnosticRow: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  diagnosticLeft: {
+    flex: 1,
+  },
+  diagnosticSectionName: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  diagnosticSectionMeta: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  diagnosticStatus: {
+    fontSize: 11,
+    fontWeight: '700',
   },
 });
 

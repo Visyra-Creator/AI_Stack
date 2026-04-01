@@ -32,6 +32,7 @@ import { openSourceStorage, openSourceCategoryStorage, OpenSourceItem } from '@/
 import { MultiSelect } from '@/src/components/common/MultiSelect';
 import { PDFViewer } from '@/src/components/common/PDFViewer';
 import { openUriExternally } from '@/src/services/fileOpener';
+import { resolveImageUri, getPrimaryImageUri as getResolvedPrimaryImageUri } from '@/src/services/imageResolver';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -375,15 +376,6 @@ export default function OpenSourceScreen() {
     }));
   };
 
-  const getImageUri = (imageStr: string) => {
-    try {
-      const parsed = JSON.parse(imageStr);
-      return parsed.uri as string | undefined;
-    } catch {
-      return undefined;
-    }
-  };
-
   const getFileName = (fileStr: string) => {
     try {
       const parsed = JSON.parse(fileStr);
@@ -419,8 +411,8 @@ export default function OpenSourceScreen() {
       } else if (uri.startsWith('http://') || uri.startsWith('https://')) {
         await openExternalLink(uri);
       } else {
-        const opened = await openUriExternally(uri);
-        if (!opened) {
+        const result = await openUriExternally(uri);
+        if (!result.success) {
           Alert.alert('Unable to open file', 'No app available to open this file.');
         }
       }
@@ -430,20 +422,23 @@ export default function OpenSourceScreen() {
   };
 
   const addLink = () => {
-    setFormData({ ...formData, links: [...formData.links, { label: '', url: '' }] });
+    setFormData((prev) => ({ ...prev, links: [...prev.links, { label: '', url: '' }] }));
   };
 
   const updateLink = (index: number, field: 'label' | 'url', value: string) => {
-    const newLinks = [...formData.links];
-    newLinks[index][field] = value;
-    setFormData({ ...formData, links: newLinks });
+    setFormData((prev) => {
+      const newLinks = [...prev.links];
+      newLinks[index][field] = value;
+      return { ...prev, links: newLinks };
+    });
   };
 
   const removeLink = (index: number) => {
-    if (formData.links.length > 1) {
-      const newLinks = formData.links.filter((_, i) => i !== index);
-      setFormData({ ...formData, links: newLinks });
-    }
+    setFormData((prev) => {
+      if (prev.links.length <= 1) return prev;
+      const newLinks = prev.links.filter((_, i) => i !== index);
+      return { ...prev, links: newLinks };
+    });
   };
 
   const openExternalLink = async (url: string) => {
@@ -529,8 +524,7 @@ export default function OpenSourceScreen() {
   };
 
   const getPrimaryImageUri = (item: OpenSourceItem) => {
-    if (!item.images || item.images.length === 0) return undefined;
-    return getImageUri(item.images[0]);
+    return getResolvedPrimaryImageUri(item);
   };
 
   const resetFilters = () => {
@@ -784,7 +778,7 @@ export default function OpenSourceScreen() {
                     <Text style={[styles.detailsImageHint, { color: colors.textSecondary }]}>Double tap an image to view full screen</Text>
                     <View style={styles.detailsImageGrid}>
                       {selectedItem.images.map((image, index) => {
-                        const uri = getImageUri(image);
+                        const uri = resolveImageUri(image);
                         if (!uri) return null;
                         return (
                           <DoubleTapImage
@@ -845,13 +839,13 @@ export default function OpenSourceScreen() {
               label="Project Name *"
               placeholder="e.g., Stable Diffusion"
               value={formData.name}
-              onChangeText={(text) => setFormData({ ...formData, name: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, name: text }))}
             />
             <FormInput
               label="Description"
               placeholder="What does this project do?"
               value={formData.description}
-              onChangeText={(text) => setFormData({ ...formData, description: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, description: text }))}
               multiline
               numberOfLines={3}
               style={styles.textArea}
@@ -860,7 +854,7 @@ export default function OpenSourceScreen() {
               label="Categories"
               options={categories}
               selectedValues={formData.categories}
-              onSelect={(categories) => setFormData({ ...formData, categories })}
+              onSelect={(categories) => setFormData((prev) => ({ ...prev, categories }))}
             />
             <TouchableOpacity
               style={[styles.manageCategoriesButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
@@ -873,7 +867,7 @@ export default function OpenSourceScreen() {
               label="Instructions"
               placeholder="Installation, setup notes..."
               value={formData.instructions}
-              onChangeText={(text) => setFormData({ ...formData, instructions: text })}
+              onChangeText={(text) => setFormData((prev) => ({ ...prev, instructions: text }))}
               multiline
               numberOfLines={4}
               style={styles.textArea}
@@ -892,7 +886,7 @@ export default function OpenSourceScreen() {
               {formData.images.length > 0 && (
                 <View style={styles.imageGrid}>
                   {formData.images.map((image, index) => {
-                    const uri = getImageUri(image);
+                    const uri = resolveImageUri(image);
                     if (!uri) return null;
                     return (
                       <View key={`${image}-${index}`} style={styles.imageItem}>

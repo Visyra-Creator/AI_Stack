@@ -4,7 +4,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import * as WebBrowser from 'expo-web-browser';
-import { openUriExternally } from '@/src/services/fileOpener';
+import { WebView } from 'react-native-webview';
+import { isPdfUri, isRemoteUri, normalizeFileUri, openUriExternally } from '@/src/services/fileOpener';
 
 interface PDFViewerProps {
   visible: boolean;
@@ -21,6 +22,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ visible, uri, fileName, on
   const [totalPages, setTotalPages] = useState(0);
   const [PdfComponent, setPdfComponent] = useState<any>(null);
   const [pdfSupported, setPdfSupported] = useState(false);
+  const [webFallbackError, setWebFallbackError] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -61,6 +63,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ visible, uri, fileName, on
     setIsLoading(true);
     setCurrentPage(1);
     setTotalPages(0);
+    setWebFallbackError(false);
   }, [visible, uri]);
 
   useEffect(() => {
@@ -69,19 +72,34 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ visible, uri, fileName, on
     }
   }, [visible, pdfSupported]);
 
-  const isRemoteUri = uri.startsWith('http://') || uri.startsWith('https://');
+  const normalizedUri = normalizeFileUri(uri) || uri;
+  const isRemotePdf = isRemoteUri(normalizedUri) && isPdfUri(normalizedUri, fileName);
+  const canUseInAppWebFallback = !pdfSupported && isRemotePdf;
+  const webPreviewUri = `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(normalizedUri)}`;
 
   const openFallback = async () => {
     try {
-      if (isRemoteUri) {
-        await WebBrowser.openBrowserAsync(uri);
+      if (isRemoteUri(normalizedUri)) {
+        await WebBrowser.openBrowserAsync(normalizedUri);
         return;
       }
-      const opened = await openUriExternally(uri);
-      if (opened) {
+      const result = await openUriExternally(normalizedUri);
+      if (result.success) {
         return;
       }
-      Alert.alert('Unable to open PDF', 'No compatible viewer is available on this device.');
+
+      const isExpoGo = Constants.appOwnership === 'expo';
+      if (isExpoGo) {
+        Alert.alert(
+          'Unable to open PDF in Expo Go',
+          'PDF viewing is only available in production builds. For Google Drive files, open with your device\'s default PDF app.'
+        );
+      } else {
+        Alert.alert(
+          'Unable to open PDF',
+          result.reason || 'No compatible viewer is available on this device. Install a PDF reader app.'
+        );
+      }
     } catch {
       Alert.alert('Unable to open PDF', 'Something went wrong while opening this PDF.');
     }
@@ -114,9 +132,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ visible, uri, fileName, on
               <Text style={[styles.loadingText, { color: colors.text }]}>Loading PDF...</Text>
             </View>
           )}
-          {pdfSupported && PdfComponent ? (
+                  {pdfSupported && PdfComponent ? (
             <PdfComponent
-              source={{ uri }}
+                      source={{ uri: normalizedUri }}
               onLoadComplete={(numberOfPages: number) => {
                 setTotalPages(numberOfPages);
                 setIsLoading(false);
@@ -131,11 +149,22 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ visible, uri, fileName, on
               style={[styles.pdf, { width, height: height - 100 }]}
               trustAllCerts={false}
             />
+          ) : canUseInAppWebFallback && !webFallbackError ? (
+            <WebView
+              source={{ uri: webPreviewUri }}
+              startInLoadingState
+              onLoadEnd={() => setIsLoading(false)}
+              onError={() => {
+                setWebFallbackError(true);
+                setIsLoading(false);
+              }}
+              style={[styles.pdf, { width, height: height - 100 }]}
+            />
           ) : (
             <View style={styles.fallbackContainer}>
               <Ionicons name="document-text-outline" size={46} color={colors.textSecondary} />
               <Text style={[styles.fallbackTitle, { color: colors.text }]}>In-app PDF preview is unavailable</Text>
-              <Text style={[styles.fallbackText, { color: colors.textSecondary }]}>Open this PDF using your device viewer.</Text>
+              <Text style={[styles.fallbackText, { color: colors.textSecondary }]}>Open this PDF with browser or a device PDF app.</Text>
               <TouchableOpacity style={[styles.fallbackButton, { backgroundColor: colors.primary }]} onPress={openFallback}>
                 <Text style={styles.fallbackButtonText}>Open PDF</Text>
               </TouchableOpacity>
