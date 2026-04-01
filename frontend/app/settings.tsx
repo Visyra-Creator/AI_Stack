@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Share } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Share, ScrollView } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -9,6 +9,8 @@ import { useTheme } from '@/src/context/ThemeContext';
 import {
   dashboardStorage,
   exportAppBackup,
+  forcePullAllFromCloud,
+  forcePushAllToCloud,
   importAppBackup,
   resetAllAppData,
   resetLocalAppData,
@@ -35,12 +37,15 @@ type SyncDiagnosticRow = {
   label: string;
   storageKey: string;
   itemCount: number;
+  remoteCount: number | null;
   lastUpdated: number | null;
   cloudMapped: boolean;
+  cloudEnabled: boolean;
 };
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { colors, mode, toggleTheme } = useTheme();
   const [resetting, setResetting] = useState(false);
   const [resettingLocal, setResettingLocal] = useState(false);
@@ -49,6 +54,8 @@ export default function SettingsScreen() {
   const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnosticRow[]>([]);
   const [syncDiagnosticsLoading, setSyncDiagnosticsLoading] = useState(false);
   const [syncDiagnosticsUpdatedAt, setSyncDiagnosticsUpdatedAt] = useState<number | null>(null);
+  const [forcePulling, setForcePulling] = useState(false);
+  const [forcePushing, setForcePushing] = useState(false);
 
   const formatRelative = (timestamp: number) => {
     const diffMs = Date.now() - timestamp;
@@ -65,7 +72,8 @@ export default function SettingsScreen() {
     try {
       const rows = await Promise.all(
         SYNC_SECTIONS.map(async ({ label, storageKey }) => {
-          const items = await dashboardStorage.getByStorageKey<any>(storageKey);
+          const items = await dashboardStorage.getLocalByStorageKey<any>(storageKey);
+          const counts = await dashboardStorage.getSyncCountsByStorageKey(storageKey);
           const lastUpdated = items.reduce((latest: number, item: any) => {
             const ts = item?.updatedAt ?? item?.createdAt ?? 0;
             return ts > latest ? ts : latest;
@@ -75,8 +83,10 @@ export default function SettingsScreen() {
             label,
             storageKey,
             itemCount: items.length,
+            remoteCount: counts.remoteCount,
             lastUpdated: lastUpdated > 0 ? lastUpdated : null,
             cloudMapped: hasPocketBaseMapping(storageKey),
+            cloudEnabled: counts.cloudEnabled,
           } satisfies SyncDiagnosticRow;
         })
       );
@@ -94,6 +104,56 @@ export default function SettingsScreen() {
   useEffect(() => {
     loadSyncDiagnostics();
   }, [loadSyncDiagnostics]);
+
+  const handleForcePullCloud = useCallback(async () => {
+    if (forcePulling) return;
+    setForcePulling(true);
+    try {
+      const result = await forcePullAllFromCloud(SYNC_SECTIONS.map((section) => section.storageKey));
+      await loadSyncDiagnostics();
+
+      if (result.failed.length === 0) {
+        Alert.alert('Cloud pull complete', `Pulled ${result.successCount}/${result.total} sections from cloud.`);
+        return;
+      }
+
+      const firstFailure = result.failed[0];
+      Alert.alert(
+        'Cloud pull partial',
+        `Pulled ${result.successCount}/${result.total} sections.\nFirst failure: ${firstFailure.storageKey} - ${firstFailure.reason}`
+      );
+    } catch (error) {
+      console.error('Force cloud pull failed:', error);
+      Alert.alert('Cloud pull failed', 'Could not pull data from cloud. Check your network and PocketBase URL.');
+    } finally {
+      setForcePulling(false);
+    }
+  }, [forcePulling, loadSyncDiagnostics]);
+
+  const handleForcePushCloud = useCallback(async () => {
+    if (forcePushing) return;
+    setForcePushing(true);
+    try {
+      const result = await forcePushAllToCloud(SYNC_SECTIONS.map((section) => section.storageKey));
+      await loadSyncDiagnostics();
+
+      if (result.failed.length === 0) {
+        Alert.alert('Cloud push complete', `Pushed ${result.successCount}/${result.total} sections to cloud.`);
+        return;
+      }
+
+      const firstFailure = result.failed[0];
+      Alert.alert(
+        'Cloud push partial',
+        `Pushed ${result.successCount}/${result.total} sections.\nFirst failure: ${firstFailure.storageKey} - ${firstFailure.reason}`
+      );
+    } catch (error) {
+      console.error('Force cloud push failed:', error);
+      Alert.alert('Cloud push failed', 'Could not push local data to cloud. Check your network and PocketBase URL.');
+    } finally {
+      setForcePushing(false);
+    }
+  }, [forcePushing, loadSyncDiagnostics]);
 
   const handleResetAppData = () => {
     if (resetting) return;
@@ -238,7 +298,11 @@ export default function SettingsScreen() {
         <View style={styles.backButton} />
       </View>
 
-      <View style={styles.content}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={{ paddingBottom: Math.max(24, insets.bottom + 20) }}
+        showsVerticalScrollIndicator={false}
+      >
         <TouchableOpacity
           style={[styles.settingRow, { backgroundColor: colors.card, borderColor: colors.border }]}
           onPress={toggleTheme}
@@ -286,19 +350,53 @@ export default function SettingsScreen() {
           <Text style={[styles.diagnosticMeta, { color: colors.textSecondary }]}>PocketBase URL configured: {POCKETBASE_URL_CONFIGURED ? 'Yes' : 'No'}</Text>
           <Text style={[styles.diagnosticMeta, { color: colors.textSecondary }]}>Last diagnostics refresh: {syncDiagnosticsUpdatedAt ? formatRelative(syncDiagnosticsUpdatedAt) : 'pending'}</Text>
 
+          <TouchableOpacity
+            style={[styles.forcePullButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+            onPress={handleForcePullCloud}
+            disabled={!CLOUD_SYNC_ENABLED || forcePulling}
+          >
+            <Ionicons name={forcePulling ? 'sync' : 'cloud-download-outline'} size={16} color={colors.textSecondary} />
+            <Text style={[styles.forcePullButtonText, { color: colors.textSecondary }]}> {forcePulling ? 'Pulling from cloud...' : 'Force Pull From Cloud'}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.forcePullButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+            onPress={handleForcePushCloud}
+            disabled={!CLOUD_SYNC_ENABLED || forcePushing}
+          >
+            <Ionicons name={forcePushing ? 'sync' : 'cloud-upload-outline'} size={16} color={colors.textSecondary} />
+            <Text style={[styles.forcePullButtonText, { color: colors.textSecondary }]}> {forcePushing ? 'Pushing to cloud...' : 'Force Push Local To Cloud'}</Text>
+          </TouchableOpacity>
+
           {syncDiagnostics.map((row) => (
             <View key={row.storageKey} style={[styles.diagnosticRow, { borderTopColor: colors.border }]}>
               <View style={styles.diagnosticLeft}>
                 <Text style={[styles.diagnosticSectionName, { color: colors.text }]}>{row.label}</Text>
-                <Text style={[styles.diagnosticSectionMeta, { color: colors.textSecondary }]}>Items: {row.itemCount} {row.lastUpdated ? `• Updated ${formatRelative(row.lastUpdated)}` : '• No local data yet'}</Text>
+                <Text style={[styles.diagnosticSectionMeta, { color: colors.textSecondary }]}>Local: {row.itemCount} {row.remoteCount !== null ? `• Cloud: ${row.remoteCount}` : ''}</Text>
+                <Text style={[styles.diagnosticSectionMeta, { color: colors.textSecondary }]}>{row.lastUpdated ? `Updated ${formatRelative(row.lastUpdated)}` : 'No local data yet'}</Text>
               </View>
               <Text
                 style={[
                   styles.diagnosticStatus,
-                  { color: !CLOUD_SYNC_ENABLED ? colors.textSecondary : row.cloudMapped ? '#16A34A' : '#F59E0B' },
+                  {
+                    color:
+                      !row.cloudEnabled
+                        ? colors.textSecondary
+                        : row.cloudMapped
+                          ? row.remoteCount !== null && row.remoteCount !== row.itemCount
+                            ? '#F59E0B'
+                            : '#16A34A'
+                          : '#F59E0B',
+                  },
                 ]}
               >
-                {!CLOUD_SYNC_ENABLED ? 'Local only' : row.cloudMapped ? 'Mapped' : 'Not mapped'}
+                {!row.cloudEnabled
+                  ? 'Local only'
+                  : !row.cloudMapped
+                    ? 'Not mapped'
+                    : row.remoteCount !== null && row.remoteCount !== row.itemCount
+                      ? 'Mismatch'
+                      : 'Synced'}
               </Text>
             </View>
           ))}
@@ -383,7 +481,7 @@ export default function SettingsScreen() {
           </View>
           <Ionicons name="warning-outline" size={18} color={colors.danger} />
         </TouchableOpacity>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -473,6 +571,20 @@ const styles = StyleSheet.create({
   diagnosticMeta: {
     fontSize: 12,
     marginTop: 2,
+  },
+  forcePullButton: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+  },
+  forcePullButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   diagnosticRow: {
     marginTop: 10,

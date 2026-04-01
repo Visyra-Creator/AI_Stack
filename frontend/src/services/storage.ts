@@ -415,6 +415,16 @@ async function saveItems<T>(key: string, items: T[]): Promise<void> {
   }
 }
 
+async function getLocalItemsOnly<T>(key: string): Promise<T[]> {
+  try {
+    const raw = await AsyncStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 async function addItem<T extends { id: string; createdAt: number }>(key: string, item: Omit<T, 'id' | 'createdAt'>): Promise<T> {
   const items = await getItems<T>(key);
   const now = Date.now();
@@ -672,7 +682,135 @@ export const noteSectionsStorage = {
 
 export const dashboardStorage = {
   getByStorageKey: <T>(storageKey: string) => getItems<T>(storageKey),
+  getLocalByStorageKey: <T>(storageKey: string) => getLocalItemsOnly<T>(storageKey),
+  getRemoteByStorageKey: async <T>(storageKey: string) => {
+    if (!shouldUsePocketBase() || !hasPocketBaseMapping(storageKey)) {
+      return [] as T[];
+    }
+    return getPocketBaseItems<T>(storageKey);
+  },
+  getSyncCountsByStorageKey: async (storageKey: string) => {
+    const localItems = await getLocalItemsOnly<any>(storageKey);
+    const cloudEnabled = shouldUsePocketBase();
+    const cloudMapped = hasPocketBaseMapping(storageKey);
+
+    if (!cloudEnabled || !cloudMapped) {
+      return {
+        localCount: localItems.length,
+        remoteCount: null as number | null,
+        cloudEnabled,
+        cloudMapped,
+      };
+    }
+
+    try {
+      const remoteItems = await getPocketBaseItems<any>(storageKey);
+      return {
+        localCount: localItems.length,
+        remoteCount: remoteItems.length,
+        cloudEnabled,
+        cloudMapped,
+      };
+    } catch {
+      return {
+        localCount: localItems.length,
+        remoteCount: null as number | null,
+        cloudEnabled,
+        cloudMapped,
+      };
+    }
+  },
 };
+
+export async function forcePullFromCloudByStorageKey(storageKey: string): Promise<{
+  success: boolean;
+  reason?: string;
+  pulledCount?: number;
+}> {
+  if (!shouldUsePocketBase()) {
+    return { success: false, reason: 'Cloud sync is disabled in this build.' };
+  }
+  if (!hasPocketBaseMapping(storageKey)) {
+    return { success: false, reason: `No cloud mapping for ${storageKey}.` };
+  }
+
+  try {
+    const remoteItems = await getPocketBaseItems<any>(storageKey);
+    await AsyncStorage.setItem(storageKey, JSON.stringify(remoteItems));
+    return { success: true, pulledCount: remoteItems.length };
+  } catch (error) {
+    return { success: false, reason: `Cloud pull failed for ${storageKey}: ${(error as Error)?.message || 'unknown error'}` };
+  }
+}
+
+export async function forcePullAllFromCloud(storageKeys: string[]): Promise<{
+  total: number;
+  successCount: number;
+  failed: { storageKey: string; reason: string }[];
+}> {
+  const failed: { storageKey: string; reason: string }[] = [];
+  let successCount = 0;
+
+  for (const storageKey of storageKeys) {
+    const result = await forcePullFromCloudByStorageKey(storageKey);
+    if (result.success) {
+      successCount += 1;
+    } else {
+      failed.push({ storageKey, reason: result.reason || 'Unknown error' });
+    }
+  }
+
+  return {
+    total: storageKeys.length,
+    successCount,
+    failed,
+  };
+}
+
+export async function forcePushToCloudByStorageKey(storageKey: string): Promise<{
+  success: boolean;
+  reason?: string;
+  pushedCount?: number;
+}> {
+  if (!shouldUsePocketBase()) {
+    return { success: false, reason: 'Cloud sync is disabled in this build.' };
+  }
+  if (!hasPocketBaseMapping(storageKey)) {
+    return { success: false, reason: `No cloud mapping for ${storageKey}.` };
+  }
+
+  try {
+    const localItems = await getLocalItemsOnly<any>(storageKey);
+    await savePocketBaseItems<any>(storageKey, localItems);
+    return { success: true, pushedCount: localItems.length };
+  } catch (error) {
+    return { success: false, reason: `Cloud push failed for ${storageKey}: ${(error as Error)?.message || 'unknown error'}` };
+  }
+}
+
+export async function forcePushAllToCloud(storageKeys: string[]): Promise<{
+  total: number;
+  successCount: number;
+  failed: { storageKey: string; reason: string }[];
+}> {
+  const failed: { storageKey: string; reason: string }[] = [];
+  let successCount = 0;
+
+  for (const storageKey of storageKeys) {
+    const result = await forcePushToCloudByStorageKey(storageKey);
+    if (result.success) {
+      successCount += 1;
+    } else {
+      failed.push({ storageKey, reason: result.reason || 'Unknown error' });
+    }
+  }
+
+  return {
+    total: storageKeys.length,
+    successCount,
+    failed,
+  };
+}
 
 const APP_STORAGE_KEYS = [
   ...Object.values(STORAGE_KEYS),
