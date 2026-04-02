@@ -29,7 +29,6 @@ import { EmptyState } from '@/src/components/common/EmptyState';
 import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { leadGenerationStorage, leadGenerationCategoryStorage, LeadGenerationItem } from '@/src/services/storage';
 import { MultiSelect } from '@/src/components/common/MultiSelect';
-import { PDFViewer } from '@/src/components/common/PDFViewer';
 import { openUriExternally } from '@/src/services/fileOpener';
 import { resolveImageUri, getPrimaryImageUri as getResolvedPrimaryImageUri } from '@/src/services/imageResolver';
 
@@ -68,10 +67,6 @@ export default function LeadGenerationScreen() {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState('');
-
-  const [pdfViewerVisible, setPdfViewerVisible] = useState(false);
-  const [pdfViewerUri, setPdfViewerUri] = useState<string>('');
-  const [pdfViewerName, setPdfViewerName] = useState<string>('');
 
   const [formData, setFormData] = useState({
     name: '',
@@ -393,9 +388,10 @@ export default function LeadGenerationScreen() {
     try {
       const isPdf = fileName.toLowerCase().endsWith('.pdf') || uri.toLowerCase().includes('pdf');
       if (isPdf) {
-        setPdfViewerUri(uri);
-        setPdfViewerName(fileName);
-        setPdfViewerVisible(true);
+        const result = await openUriExternally(uri);
+        if (!result.success) {
+          Alert.alert('Unable to open PDF', result.reason || 'No app available to open this file.');
+        }
       } else if (uri.startsWith('http://') || uri.startsWith('https://')) {
         await openExternalLink(uri);
       } else {
@@ -1029,13 +1025,6 @@ export default function LeadGenerationScreen() {
         </View>
       </Modal>
 
-      <PDFViewer
-        visible={pdfViewerVisible}
-        uri={pdfViewerUri}
-        fileName={pdfViewerName}
-        onClose={() => setPdfViewerVisible(false)}
-        colors={colors}
-      />
     </SafeAreaView>
   );
 }

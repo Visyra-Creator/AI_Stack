@@ -30,7 +30,6 @@ import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { tutorialsStorage, TutorialItem, tutorialsCategoryStorage } from '@/src/services/storage';
 import { MultiSelect } from '@/src/components/common/MultiSelect';
-import { PDFViewer } from '@/src/components/common/PDFViewer';
 import { openUriExternally } from '@/src/services/fileOpener';
 import { getImageUris, getPrimaryImageUri as getResolvedPrimaryImageUri } from '@/src/services/imageResolver';
 import { CLOUD_SYNC_ENABLED } from '@/src/config/runtime';
@@ -74,10 +73,6 @@ export default function TutorialsScreen() {
   const [isManualSyncing, setIsManualSyncing] = useState(false);
   const [syncToast, setSyncToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const syncToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const [pdfViewerVisible, setPdfViewerVisible] = useState(false);
-  const [pdfViewerUri, setPdfViewerUri] = useState<string>('');
-  const [pdfViewerName, setPdfViewerName] = useState<string>('');
 
   const showSyncToast = useCallback((text: string, type: 'success' | 'error') => {
     if (syncToastTimerRef.current) {
@@ -427,9 +422,10 @@ export default function TutorialsScreen() {
     try {
       const isPdf = fileName.toLowerCase().endsWith('.pdf') || uri.toLowerCase().includes('pdf');
       if (isPdf) {
-        setPdfViewerUri(uri);
-        setPdfViewerName(fileName);
-        setPdfViewerVisible(true);
+        const result = await openUriExternally(uri);
+        if (!result.success) {
+          Alert.alert('Unable to open PDF', result.reason || 'No app is available to open this file.');
+        }
       } else if (uri.startsWith('http://') || uri.startsWith('https://')) {
         await openExternalLink(uri);
       } else {
@@ -1062,13 +1058,6 @@ export default function TutorialsScreen() {
         </View>
       )}
 
-      <PDFViewer
-        visible={pdfViewerVisible}
-        uri={pdfViewerUri}
-        fileName={pdfViewerName}
-        onClose={() => setPdfViewerVisible(false)}
-        colors={colors}
-      />
     </SafeAreaView>
   );
 }
