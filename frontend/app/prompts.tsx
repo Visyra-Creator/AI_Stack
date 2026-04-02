@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -65,6 +65,8 @@ export default function PromptsScreen() {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState('');
+  const [actionToast, setActionToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const actionToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [formData, setFormData] = useState({
     promptName: '',
@@ -98,6 +100,25 @@ export default function PromptsScreen() {
     loadItems();
     loadCategories();
   }, [loadItems, loadCategories]);
+
+  const showActionToast = useCallback((text: string, type: 'success' | 'error') => {
+    if (actionToastTimerRef.current) {
+      clearTimeout(actionToastTimerRef.current);
+    }
+    setActionToast({ text, type });
+    actionToastTimerRef.current = setTimeout(() => {
+      setActionToast(null);
+      actionToastTimerRef.current = null;
+    }, 1800);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (actionToastTimerRef.current) {
+        clearTimeout(actionToastTimerRef.current);
+      }
+    };
+  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -166,7 +187,13 @@ export default function PromptsScreen() {
     const allItems = await promptsStorage.getAll();
     const affectedItems = allItems.filter(item => item.categories?.includes(editingCategory));
     await Promise.all(
-      affectedItems.map(item => promptsStorage.update(item.id, { categories: updatedCategories })),
+      affectedItems.map(item =>
+        promptsStorage.update(item.id, {
+          categories: (item.categories || []).map(category =>
+            category === editingCategory ? value : category,
+          ),
+        }),
+      ),
     );
 
     setFormData(prev => ({
@@ -198,7 +225,12 @@ export default function PromptsScreen() {
             const allItems = await promptsStorage.getAll();
             const affectedItems = allItems.filter(item => item.categories?.includes(categoryToDelete));
             await Promise.all(
-              affectedItems.map(item => promptsStorage.update(item.id, { categories: fallbackCategory })),
+              affectedItems.map(item => {
+                const nextCategories = (item.categories || []).filter(category => category !== categoryToDelete);
+                return promptsStorage.update(item.id, {
+                  categories: nextCategories.length > 0 ? nextCategories : [fallbackCategory],
+                });
+              }),
             );
 
             setFormData(prev => ({
@@ -296,8 +328,17 @@ export default function PromptsScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await promptsStorage.delete(item.id);
-          await loadItems();
+          try {
+            await promptsStorage.delete(item.id);
+            setItems(prev => prev.filter(current => current.id !== item.id));
+            if (selectedItem?.id === item.id) {
+              setSelectedItem(null);
+              setDetailsVisible(false);
+            }
+            showActionToast('Prompt deleted', 'success');
+          } catch {
+            showActionToast('Delete failed', 'error');
+          }
         },
       },
     ]);
@@ -971,6 +1012,17 @@ export default function PromptsScreen() {
           </View>
         </View>
       </Modal>
+
+      {actionToast && (
+        <View
+          style={[
+            styles.actionToast,
+            { backgroundColor: actionToast.type === 'success' ? '#16A34A' : colors.danger },
+          ]}
+        >
+          <Text style={styles.actionToastText}>{actionToast.text}</Text>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -1382,6 +1434,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 6,
     marginRight: 8,
+  },
+  actionToast: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    bottom: 20,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    zIndex: 20,
+  },
+  actionToastText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
   },
   bottomPadding: {
     height: 40,

@@ -3,8 +3,20 @@ import PocketBase from 'pocketbase';
 const POCKETBASE_URL = process.env.EXPO_PUBLIC_POCKETBASE_URL?.trim();
 const USE_POCKETBASE = process.env.EXPO_PUBLIC_USE_POCKETBASE === 'true' && !!POCKETBASE_URL;
 
-const pb = POCKETBASE_URL ? new PocketBase(POCKETBASE_URL) : null;
+const pb = POCKETBASE_URL
+  ? (() => {
+      const client = new PocketBase(POCKETBASE_URL);
+      // Sync runs concurrent list/update calls; disable SDK auto-cancel to avoid aborted sync requests.
+      client.autoCancellation(false);
+      return client;
+    })()
+  : null;
 const MAX_RESOURCE_PAYLOAD_LENGTH = 5000;
+
+const isAutoCancelledError = (error: unknown) => {
+  const message = (error as any)?.message;
+  return typeof message === 'string' && message.toLowerCase().includes('autocancel');
+};
 
 const KEY_TO_KIND: Record<string, string> = {
   ai_stack: 'ai_stack',
@@ -225,6 +237,9 @@ export async function savePocketBaseItems<T>(key: string, items: T[]): Promise<v
       filter: `kind = \"${kind}\"`,
     });
   } catch (error) {
+    if (isAutoCancelledError(error)) {
+      return;
+    }
     // Continue with upsert path even if the prefetch fails.
     console.warn(`PocketBase existing-record fetch failed for ${kind}, continuing sync:`, error);
   }

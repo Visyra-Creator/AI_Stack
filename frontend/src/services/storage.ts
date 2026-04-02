@@ -426,7 +426,7 @@ async function getLocalItemsOnly<T>(key: string): Promise<T[]> {
 }
 
 async function addItem<T extends { id: string; createdAt: number }>(key: string, item: Omit<T, 'id' | 'createdAt'>): Promise<T> {
-  const items = await getItems<T>(key);
+  const items = await getLocalItemsOnly<T>(key);
   const now = Date.now();
   const newItem = { 
     ...item, 
@@ -441,7 +441,7 @@ async function addItem<T extends { id: string; createdAt: number }>(key: string,
 }
 
 async function updateItem<T extends { id: string }>(key: string, id: string, updates: Partial<T>): Promise<void> {
-  const items = await getItems<T>(key);
+  const items = await getLocalItemsOnly<T>(key);
   const index = items.findIndex(item => item.id === id);
   if (index !== -1) {
     const finalUpdates: any = { ...updates };
@@ -460,7 +460,7 @@ async function updateItem<T extends { id: string }>(key: string, id: string, upd
 
 async function deleteItem<T extends { id: string }>(key: string, id: string): Promise<void> {
 
-  const items = await getItems<T>(key);
+  const items = await getLocalItemsOnly<T>(key);
   const filtered = items.filter(item => item.id !== id);
   await saveItems(key, filtered);
 }

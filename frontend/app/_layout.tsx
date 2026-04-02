@@ -9,6 +9,8 @@ import { ErrorBoundary } from '@/src/components/common/ErrorBoundary';
 
 import { ThemeProvider as NavThemeProvider, DarkTheme, DefaultTheme } from '@react-navigation/native';
 
+
+
 function RootLayoutNav() {
   const { colors, mode } = useTheme();
   const router = useRouter();

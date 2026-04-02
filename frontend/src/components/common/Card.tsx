@@ -47,7 +47,14 @@ export const Card: React.FC<CardProps> = ({
         </View>
         <View style={styles.actions}>
           {onFavorite && (
-            <TouchableOpacity onPress={onFavorite} style={styles.iconButton}>
+            <TouchableOpacity
+              onPress={(event) => {
+                event.stopPropagation();
+                onFavorite();
+              }}
+              style={styles.iconButton}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
               <Ionicons
                 name={isFavorite ? 'heart' : 'heart-outline'}
                 size={18}
@@ -56,12 +63,26 @@ export const Card: React.FC<CardProps> = ({
             </TouchableOpacity>
           )}
           {onEdit && (
-            <TouchableOpacity onPress={onEdit} style={styles.iconButton}>
+            <TouchableOpacity
+              onPress={(event) => {
+                event.stopPropagation();
+                onEdit();
+              }}
+              style={styles.iconButton}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
               <Ionicons name="pencil" size={18} color={colors.primary} />
             </TouchableOpacity>
           )}
           {onDelete && (
-            <TouchableOpacity onPress={onDelete} style={styles.iconButton}>
+            <TouchableOpacity
+              onPress={(event) => {
+                event.stopPropagation();
+                onDelete();
+              }}
+              style={styles.iconButton}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
               <Ionicons name="trash-outline" size={18} color={colors.danger} />
             </TouchableOpacity>
           )}
