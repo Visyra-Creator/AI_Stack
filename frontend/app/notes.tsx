@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/src/context/ThemeContext';
-import { notesStorage, noteSectionsStorage, NoteItem as Note, NoteSection as Section } from '@/src/services/storage';
+import { notesStorage, noteSectionsStorage, NoteItem as Note, NoteSection as Section, migrateNotesToRichTextFormat } from '@/src/services/storage';
 import { CLOUD_SYNC_ENABLED } from '@/src/config/runtime';
 
 export default function NotesScreen() {
@@ -30,9 +30,11 @@ export default function NotesScreen() {
   const [selectedSectionId, setSelectedSectionId] = useState<string>('');
   const [newSectionName, setNewSectionName] = useState('');
   const [showSectionModal, setShowSectionModal] = useState(false);
-  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
-  const [noteContent, setNoteContent] = useState('');
-  const [editorModalVisible, setEditorModalVisible] = useState(false);
+  const [showManageSectionsModal, setShowManageSectionsModal] = useState(false);
+  const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
+   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+   const [noteContent, setNoteContent] = useState('');
+   const [editorModalVisible, setEditorModalVisible] = useState(false);
   const [isManualSyncing, setIsManualSyncing] = useState(false);
   const [syncToast, setSyncToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const syncToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -58,6 +60,9 @@ export default function NotesScreen() {
 
   const loadNotes = useCallback(async () => {
     try {
+      // Run migration on first load
+      await migrateNotesToRichTextFormat();
+
       const notesArray = await notesStorage.getAll();
       const sorted = [...notesArray].sort((a: Note, b: Note) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
       setNotes(sorted);
@@ -108,43 +113,47 @@ export default function NotesScreen() {
     }
   }, [cloudSyncEnabled, isManualSyncing, loadSections, loadNotes, showSyncToast]);
 
-  const saveNote = useCallback(async () => {
-    if (!noteContent.trim()) {
-      Alert.alert('Empty Note', 'Please enter some content for the note.');
-      return;
-    }
+   const saveNote = useCallback(async () => {
+     if (!noteContent.trim()) {
+       Alert.alert('Empty Note', 'Please enter some content for the note.');
+       return;
+     }
 
-    if (!selectedSectionId) {
-      Alert.alert('No Section', 'Please select or create a section first.');
-      return;
-    }
+     if (!selectedSectionId) {
+       Alert.alert('No Section', 'Please select or create a section first.');
+       return;
+     }
 
-    try {
-      if (editingNoteId) {
-        await notesStorage.update(editingNoteId, {
-          content: noteContent.trim(),
-          sectionId: selectedSectionId,
-        });
-      } else {
-        await notesStorage.add({
-          content: noteContent.trim(),
-          sectionId: selectedSectionId,
-          updatedAt: Date.now(),
-        });
-      }
+     try {
+       const contentToSave = noteContent.trim();
 
-      setNoteContent('');
-      setEditingNoteId(null);
-      setEditorModalVisible(false);
-      await loadNotes();
-      if (cloudSyncEnabled) {
-        setLastSyncedAt(Date.now());
-      }
-    } catch (error) {
-      console.error('Error saving note:', error);
-      Alert.alert('Error', 'Failed to save note.');
-    }
-  }, [noteContent, selectedSectionId, editingNoteId, loadNotes, cloudSyncEnabled]);
+       if (editingNoteId) {
+         await notesStorage.update(editingNoteId, {
+           content: contentToSave,
+           contentVersion: 1,
+           sectionId: selectedSectionId,
+         });
+       } else {
+         await notesStorage.add({
+           content: contentToSave,
+           contentVersion: 1,
+           sectionId: selectedSectionId,
+           updatedAt: Date.now(),
+         });
+       }
+
+       setNoteContent('');
+       setEditingNoteId(null);
+       setEditorModalVisible(false);
+       await loadNotes();
+       if (cloudSyncEnabled) {
+         setLastSyncedAt(Date.now());
+       }
+     } catch (error) {
+       console.error('Error saving note:', error);
+       Alert.alert('Error', 'Failed to save note.');
+     }
+   }, [noteContent, selectedSectionId, editingNoteId, loadNotes, cloudSyncEnabled]);
 
   const deleteNote = useCallback(
     async (noteId: string) => {
@@ -178,14 +187,33 @@ export default function NotesScreen() {
     }
 
     try {
-      const newSection = await noteSectionsStorage.add({
-        name: newSectionName.trim(),
-        updatedAt: Date.now(),
-      });
+      const normalizedName = newSectionName.trim();
+      const duplicate = sections.some(
+        (section) =>
+          section.name.toLowerCase() === normalizedName.toLowerCase() && section.id !== editingSectionId,
+      );
+
+      if (duplicate) {
+        Alert.alert('Duplicate Section', 'A section with this name already exists.');
+        return;
+      }
+
+      if (editingSectionId) {
+        await noteSectionsStorage.update(editingSectionId, {
+          name: normalizedName,
+          updatedAt: Date.now(),
+        });
+      } else {
+        const newSection = await noteSectionsStorage.add({
+          name: normalizedName,
+          updatedAt: Date.now(),
+        });
+        setSelectedSectionId(newSection.id);
+      }
 
       setNewSectionName('');
+      setEditingSectionId(null);
       setShowSectionModal(false);
-      setSelectedSectionId(newSection.id);
       await loadSections();
       if (cloudSyncEnabled) {
         setLastSyncedAt(Date.now());
@@ -194,7 +222,38 @@ export default function NotesScreen() {
       console.error('Error creating section:', error);
       Alert.alert('Error', 'Failed to create section.');
     }
-  }, [newSectionName, loadSections, cloudSyncEnabled]);
+  }, [newSectionName, sections, editingSectionId, loadSections, cloudSyncEnabled]);
+
+  const startEditSection = useCallback((section: Section) => {
+    setEditingSectionId(section.id);
+    setNewSectionName(section.name);
+    setShowSectionModal(true);
+    setShowManageSectionsModal(false);
+  }, []);
+
+  const moveSection = useCallback(
+    async (sectionId: string, direction: 'up' | 'down') => {
+      const index = sections.findIndex((s) => s.id === sectionId);
+      if (index === -1) return;
+
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= sections.length) return;
+
+      try {
+        const reordered = [...sections];
+        [reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]];
+        await noteSectionsStorage.saveAll(reordered);
+        setSections(reordered);
+        if (cloudSyncEnabled) {
+          setLastSyncedAt(Date.now());
+        }
+      } catch (error) {
+        console.error('Error reordering sections:', error);
+        Alert.alert('Error', 'Failed to reorder sections.');
+      }
+    },
+    [sections, cloudSyncEnabled],
+  );
 
   const deleteSection = useCallback(
     async (sectionId: string) => {
@@ -205,12 +264,15 @@ export default function NotesScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const sectionsArray = await noteSectionsStorage.getAll();
-              const filteredSections = sectionsArray.filter((sec: Section) => sec.id !== sectionId);
-              await noteSectionsStorage.saveAll(filteredSections);
+              const filteredSections = sections.filter((sec: Section) => sec.id !== sectionId);
+              const filteredNotes = notes.filter((note: Note) => note.sectionId !== sectionId);
 
-              const notesArray = await notesStorage.getAll();
-              const filteredNotes = notesArray.filter((note: Note) => note.sectionId !== sectionId);
+              // Update UI immediately so deleted sections disappear without waiting for async sync.
+              setSections(filteredSections);
+              setNotes(filteredNotes);
+              setShowManageSectionsModal(false);
+
+              await noteSectionsStorage.saveAll(filteredSections);
               await notesStorage.saveAll(filteredNotes);
 
               if (selectedSectionId === sectionId && filteredSections.length > 0) {
@@ -219,8 +281,6 @@ export default function NotesScreen() {
                 setSelectedSectionId('');
               }
 
-              await loadSections();
-              await loadNotes();
               if (cloudSyncEnabled) {
                 setLastSyncedAt(Date.now());
               }
@@ -232,7 +292,7 @@ export default function NotesScreen() {
         },
       ]);
     },
-    [selectedSectionId, loadSections, loadNotes, cloudSyncEnabled]
+    [sections, notes, selectedSectionId, cloudSyncEnabled]
   );
 
   const formatRelativeSync = (timestamp: number) => {
@@ -263,11 +323,11 @@ export default function NotesScreen() {
     return notes.filter((note) => note.sectionId === sectionId);
   };
 
-  const editNote = (note: Note) => {
-    setEditingNoteId(note.id);
-    setNoteContent(note.content);
-    setEditorModalVisible(true);
-  };
+   const editNote = (note: Note) => {
+     setEditingNoteId(note.id);
+     setNoteContent(note.content);
+     setEditorModalVisible(true);
+   };
 
   const createNewNote = () => {
     if (!selectedSectionId) {
@@ -279,11 +339,11 @@ export default function NotesScreen() {
     setEditorModalVisible(true);
   };
 
-  const closeEditor = () => {
-    setNoteContent('');
-    setEditingNoteId(null);
-    setEditorModalVisible(false);
-  };
+   const closeEditor = () => {
+     setNoteContent('');
+     setEditingNoteId(null);
+     setEditorModalVisible(false);
+   };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -324,6 +384,7 @@ export default function NotesScreen() {
             onPress={() => router.push('/')}
             style={[
               styles.syncButton,
+              { marginRight: 52 },
               { backgroundColor: colors.surface, borderColor: colors.border },
             ]}
           >
@@ -343,7 +404,6 @@ export default function NotesScreen() {
             <TouchableOpacity
               key={section.id}
               onPress={() => setSelectedSectionId(section.id)}
-              onLongPress={() => deleteSection(section.id)}
               style={[
                 styles.sectionTab,
                 {
@@ -372,13 +432,27 @@ export default function NotesScreen() {
 
           {/* Add Section Button */}
           <TouchableOpacity
-            onPress={() => setShowSectionModal(true)}
+            onPress={() => {
+              setEditingSectionId(null);
+              setNewSectionName('');
+              setShowSectionModal(true);
+            }}
             style={[
               styles.sectionTab,
               { backgroundColor: 'transparent' },
             ]}
           >
             <Ionicons name="add" size={20} color={colors.primary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => setShowManageSectionsModal(true)}
+            style={[
+              styles.sectionTab,
+              { backgroundColor: 'transparent' },
+            ]}
+          >
+            <Ionicons name="settings-outline" size={18} color={colors.textSecondary} />
           </TouchableOpacity>
         </ScrollView>
       </View>
@@ -508,27 +582,26 @@ export default function NotesScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Editor Content */}
-            <View style={styles.editorContent}>
-              <TextInput
-                style={[
-                  styles.noteTextInput,
-                  {
-                    backgroundColor: colors.card,
-                    color: colors.text,
-                    borderColor: colors.border,
-                  },
-                ]}
-                placeholder="Write your note here..."
-                placeholderTextColor={colors.textSecondary}
-                multiline
-                textAlignVertical="top"
-                value={noteContent}
-                onChangeText={setNoteContent}
-              />
-            </View>
+             {/* Text Editor */}
+             <TextInput
+               style={[
+                 styles.noteTextInput,
+                 {
+                   backgroundColor: colors.card,
+                   color: colors.text,
+                   borderColor: colors.border,
+                 },
+               ]}
+               placeholder="Write your note here..."
+               placeholderTextColor={colors.textSecondary}
+               value={noteContent}
+               onChangeText={setNoteContent}
+               multiline
+               scrollEnabled
+               editable={true}
+             />
 
-            {/* Delete Button */}
+             {/* Delete Button */}
             {editingNoteId && (
               <TouchableOpacity
                 onPress={() => deleteNote(editingNoteId)}
@@ -557,7 +630,7 @@ export default function NotesScreen() {
         <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}>
           <View style={[styles.sectionModalContent, { backgroundColor: colors.card }]}>
             <Text style={[styles.sectionModalTitle, { color: colors.text }]}>
-              New Section
+              {editingSectionId ? 'Edit Section' : 'New Section'}
             </Text>
             <TextInput
               style={[
@@ -578,6 +651,7 @@ export default function NotesScreen() {
               <TouchableOpacity
                 onPress={() => {
                   setNewSectionName('');
+                  setEditingSectionId(null);
                   setShowSectionModal(false);
                 }}
                 style={[
@@ -602,10 +676,81 @@ export default function NotesScreen() {
                     { color: colors.surface },
                   ]}
                 >
-                  Create
+                  {editingSectionId ? 'Save' : 'Create'}
                 </Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Manage Sections Modal */}
+      <Modal
+        visible={showManageSectionsModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowManageSectionsModal(false)}
+      >
+        <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}>
+          <View style={[styles.sectionModalContent, { backgroundColor: colors.card }]}>
+            <Text style={[styles.sectionModalTitle, { color: colors.text }]}>Manage Sections</Text>
+            <ScrollView style={styles.manageSectionsList}>
+              {sections.map((section, index) => {
+                const noteCount = notes.filter((note) => note.sectionId === section.id).length;
+                return (
+                  <View key={section.id} style={[styles.manageSectionRow, { borderBottomColor: colors.border }]}>
+                    <Text style={[styles.manageSectionName, { color: colors.text }]} numberOfLines={1}>
+                      {section.name} ({noteCount})
+                    </Text>
+                    <View style={styles.manageSectionActions}>
+                      <TouchableOpacity
+                        onPress={() => moveSection(section.id, 'up')}
+                        disabled={index === 0}
+                        style={styles.manageSectionActionBtn}
+                      >
+                        <Ionicons
+                          name="chevron-up-outline"
+                          size={18}
+                          color={index === 0 ? colors.textSecondary + '66' : colors.textSecondary}
+                        />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => moveSection(section.id, 'down')}
+                        disabled={index === sections.length - 1}
+                        style={styles.manageSectionActionBtn}
+                      >
+                        <Ionicons
+                          name="chevron-down-outline"
+                          size={18}
+                          color={index === sections.length - 1 ? colors.textSecondary + '66' : colors.textSecondary}
+                        />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => startEditSection(section)} style={styles.manageSectionActionBtn}>
+                        <Ionicons name="create-outline" size={18} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => {
+                          // Close modal first so confirm alert is always tappable.
+                          setShowManageSectionsModal(false);
+                          requestAnimationFrame(() => {
+                            deleteSection(section.id);
+                          });
+                        }}
+                        style={styles.manageSectionActionBtn}
+                      >
+                        <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })}
+            </ScrollView>
+            <TouchableOpacity
+              onPress={() => setShowManageSectionsModal(false)}
+              style={[styles.sectionModalButton, { backgroundColor: colors.surface, marginTop: 12 }]}
+            >
+              <Text style={[styles.sectionModalButtonText, { color: colors.text }]}>Done</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -801,22 +946,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  editorContent: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingVertical: 20,
-  },
-  noteTextInput: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '400',
-    lineHeight: 22,
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    textAlignVertical: 'top',
-  },
+   editorContent: {
+     flex: 1,
+     paddingHorizontal: 24,
+     paddingVertical: 20,
+   },
+   noteTextInput: {
+     flex: 1,
+     fontSize: 15,
+     fontWeight: '400',
+     lineHeight: 22,
+     borderRadius: 12,
+     borderWidth: 1,
+     paddingHorizontal: 16,
+     paddingVertical: 16,
+     textAlignVertical: 'top',
+     marginHorizontal: 24,
+     marginVertical: 16,
+   },
   deleteNoteButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -876,6 +1023,30 @@ const styles = StyleSheet.create({
   sectionModalButtonText: {
     fontSize: 15,
     fontWeight: '700',
+  },
+  manageSectionsList: {
+    maxHeight: 280,
+  },
+  manageSectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 10,
+  },
+  manageSectionName: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  manageSectionActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  manageSectionActionBtn: {
+    padding: 4,
   },
   // Floating Action Button
   fab: {

@@ -267,6 +267,8 @@ export interface MarketingItem {
 export interface NoteItem {
   id: string;
   content: string;
+  richContent?: string; // HTML formatted content (optional, for backward compatibility)
+  contentVersion?: 1 | 2; // 1 = plain text, 2 = rich text with HTML
   sectionId: string;
   createdAt: number;
   updatedAt?: number;
@@ -880,3 +882,63 @@ export const marketingCategoryStorage = {
   saveAll: (categories: string[]) => saveItems(STORAGE_KEYS.MARKETING_CATEGORIES, categories),
 };
 
+/**
+ * Migrate existing plain text notes to rich text format
+ * This ensures backward compatibility and allows old notes to work with the new editor
+ */
+export async function migrateNotesToRichTextFormat(): Promise<{
+  migrated: number;
+  skipped: number;
+}> {
+  try {
+    const notes = await getLocalItemsOnly<NoteItem>(STORAGE_KEYS.NOTES);
+    let migrated = 0;
+    let skipped = 0;
+
+    const updatedNotes = notes.map((note: NoteItem) => {
+      // If note already has richContent or is marked as contentVersion 2, skip
+      if (note.richContent || note.contentVersion === 2) {
+        skipped++;
+        return note;
+      }
+
+      // Migrate plain text to rich HTML format
+      migrated++;
+      const plainText = note.content || '';
+      // Convert plain text to basic HTML
+      const richHTML = plainText
+        .split('\n')
+        .map(line => (line.trim() ? `<p>${escapeHtml(line)}</p>` : '<p><br></p>'))
+        .join('');
+
+      return {
+        ...note,
+        richContent: richHTML,
+        contentVersion: 2,
+      };
+    });
+
+    if (migrated > 0) {
+      await saveItems(STORAGE_KEYS.NOTES, updatedNotes);
+    }
+
+    return { migrated, skipped };
+  } catch (error) {
+    console.error('Error migrating notes to rich text format:', error);
+    return { migrated: 0, skipped: 0 };
+  }
+}
+
+/**
+ * Escape HTML special characters
+ */
+function escapeHtml(text: string): string {
+  const map: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;',
+  };
+  return text.replace(/[&<>"']/g, (char) => map[char]);
+}

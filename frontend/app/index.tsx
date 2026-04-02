@@ -90,6 +90,14 @@ const sections: Section[] = [
 ];
 
 const menuSections: MenuSection[] = [
+  {
+    id: 'all',
+    title: 'All',
+    icon: 'grid-outline',
+    route: '/all',
+    color: '#6366F1',
+    showCount: false,
+  },
   ...sections.map(({ storageKey, ...section }) => ({ ...section, showCount: true })),
   {
     id: 'settings',
@@ -397,6 +405,12 @@ export default function HomeScreen() {
             onPress={() => setIsMenuVisible(true)}
           >
             <Ionicons name="menu-outline" size={20} color={colors.text} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.headerButton, { backgroundColor: colors.surface }]}
+            onPress={() => router.push('/all')}
+          >
+            <Ionicons name="grid-outline" size={20} color={colors.text} />
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.headerButton, { backgroundColor: colors.surface }]}

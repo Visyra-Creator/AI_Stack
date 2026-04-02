@@ -16,6 +16,7 @@ function RootLayoutNav() {
   const router = useRouter();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
+  const showBackArrow = pathname !== '/';
   const hasLocalHomeControl =
     pathname === '/' ||
     pathname.startsWith('/notes') ||
@@ -66,6 +67,31 @@ function RootLayoutNav() {
           }}
         />
 
+        {showBackArrow && (
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={[
+              styles.backFab,
+              !hasLocalHomeControl
+                ? {
+                    bottom: insets.bottom + 16,
+                    left: 64,
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  }
+                : {
+                    top: insets.top + 8,
+                    right: 16,
+                    backgroundColor: colors.card,
+                    borderColor: colors.border,
+                  },
+            ]}
+            activeOpacity={0.9}
+          >
+            <Ionicons name="arrow-back" size={18} color={colors.text} />
+          </TouchableOpacity>
+        )}
+
         {!hasLocalHomeControl && (
           <TouchableOpacity
             onPress={() => router.push('/')}
@@ -104,6 +130,21 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 6,
     zIndex: 999,
+  },
+  backFab: {
+    position: 'absolute',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+    zIndex: 1000,
   },
 });
 

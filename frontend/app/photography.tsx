@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ExpoImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { VideoView, useVideoPlayer } from 'expo-video';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@/src/context/ThemeContext';
 import { Select } from '@/src/components/common/Select';
 import { ImagePicker } from '@/src/components/common/ImagePicker';
@@ -17,6 +18,7 @@ type SavedImage = {
   uri: string;
   category: string;
   style: string;
+  subsection?: string;
 };
 
 type SavedVideo = {
@@ -25,7 +27,10 @@ type SavedVideo = {
   thumbnailUri?: string;
   category: string;
   style: string;
+  subsection?: string;
 };
+
+type SubsectionSection = SectionId;
 
 const DEFAULT_CATEGORY_OPTIONS = [
   'Weddings',
@@ -50,6 +55,8 @@ const DEFAULT_STYLE_OPTIONS = [
 ];
 
 const IMAGE_SORT_OPTIONS = ['Newest', 'Oldest', 'Category', 'Style'];
+const PHOTOGRAPHY_IMAGE_SUBSECTIONS_KEY = 'photography_image_subsections';
+const PHOTOGRAPHY_VIDEO_SUBSECTIONS_KEY = 'photography_video_subsections';
 
 type PreviewVideoPlayerProps = {
   uri: string;
@@ -100,8 +107,10 @@ export default function PhotographyScreen() {
   const [selectedVideoIds, setSelectedVideoIds] = useState<string[]>([]);
   const [imageFilterCategory, setImageFilterCategory] = useState('All');
   const [imageSortBy, setImageSortBy] = useState('Newest');
+  const [imageFilterSubsection, setImageFilterSubsection] = useState('');
   const [videoFilterCategory, setVideoFilterCategory] = useState('All');
   const [videoSortBy, setVideoSortBy] = useState('Newest');
+  const [videoFilterSubsection, setVideoFilterSubsection] = useState('');
   const [imageFilterModalVisible, setImageFilterModalVisible] = useState(false);
   const [imageSortModalVisible, setImageSortModalVisible] = useState(false);
   const [videoFilterModalVisible, setVideoFilterModalVisible] = useState(false);
@@ -114,14 +123,23 @@ export default function PhotographyScreen() {
   const [editingCategoryName, setEditingCategoryName] = useState('');
   const [editingStyle, setEditingStyle] = useState<string | null>(null);
   const [editingStyleName, setEditingStyleName] = useState('');
+  const [imageSubsections, setImageSubsections] = useState<string[]>([]);
+  const [videoSubsections, setVideoSubsections] = useState<string[]>([]);
+  const [subsectionModalVisible, setSubsectionModalVisible] = useState(false);
+  const [subsectionSection, setSubsectionSection] = useState<SubsectionSection>('images');
+  const [newSubsectionName, setNewSubsectionName] = useState('');
+  const [editingSubsection, setEditingSubsection] = useState<string | null>(null);
+  const [editingSubsectionName, setEditingSubsectionName] = useState('');
   const [imageForm, setImageForm] = useState({
     category: '',
     style: '',
+    subsection: '',
     images: [] as string[],
   });
   const [videoForm, setVideoForm] = useState({
     category: '',
     style: '',
+    subsection: '',
     videos: [] as string[],
   });
   const sections: { label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
@@ -151,7 +169,12 @@ export default function PhotographyScreen() {
       return item.category === imageFilterCategory;
     });
 
-    const sorted = [...filtered];
+    const subsectionFiltered = filtered.filter((item) => {
+      if (!imageFilterSubsection) return true;
+      return (item.subsection || '') === imageFilterSubsection;
+    });
+
+    const sorted = [...subsectionFiltered];
     if (imageSortBy === 'Oldest') {
       sorted.reverse();
     } else if (imageSortBy === 'Category') {
@@ -161,7 +184,7 @@ export default function PhotographyScreen() {
     }
 
     return sorted;
-  }, [savedImages, imageFilterCategory, imageSortBy]);
+  }, [savedImages, imageFilterCategory, imageFilterSubsection, imageSortBy]);
 
   const displayedVideos = useMemo(() => {
     const filtered = savedVideos.filter((item) => {
@@ -169,7 +192,12 @@ export default function PhotographyScreen() {
       return item.category === videoFilterCategory;
     });
 
-    const sorted = [...filtered];
+    const subsectionFiltered = filtered.filter((item) => {
+      if (!videoFilterSubsection) return true;
+      return (item.subsection || '') === videoFilterSubsection;
+    });
+
+    const sorted = [...subsectionFiltered];
     if (videoSortBy === 'Oldest') {
       sorted.reverse();
     } else if (videoSortBy === 'Category') {
@@ -179,7 +207,7 @@ export default function PhotographyScreen() {
     }
 
     return sorted;
-  }, [savedVideos, videoFilterCategory, videoSortBy]);
+  }, [savedVideos, videoFilterCategory, videoFilterSubsection, videoSortBy]);
 
   const handleUploadPress = (section: SectionId) => {
     if (section === 'images') {
@@ -201,6 +229,7 @@ export default function PhotographyScreen() {
     setImageForm({
       category: '',
       style: '',
+      subsection: '',
       images: [],
     });
   };
@@ -209,9 +238,47 @@ export default function PhotographyScreen() {
     setVideoForm({
       category: '',
       style: '',
+      subsection: '',
       videos: [],
     });
   };
+
+  useEffect(() => {
+    const loadSubsections = async () => {
+      try {
+        const [rawImageSubsections, rawVideoSubsections] = await Promise.all([
+          AsyncStorage.getItem(PHOTOGRAPHY_IMAGE_SUBSECTIONS_KEY),
+          AsyncStorage.getItem(PHOTOGRAPHY_VIDEO_SUBSECTIONS_KEY),
+        ]);
+
+        const parsedImage = rawImageSubsections ? JSON.parse(rawImageSubsections) : [];
+        const parsedVideo = rawVideoSubsections ? JSON.parse(rawVideoSubsections) : [];
+
+        if (Array.isArray(parsedImage)) {
+          setImageSubsections(parsedImage.filter((item) => typeof item === 'string'));
+        }
+        if (Array.isArray(parsedVideo)) {
+          setVideoSubsections(parsedVideo.filter((item) => typeof item === 'string'));
+        }
+      } catch (error) {
+        console.error('Failed to load photography subsections:', error);
+      }
+    };
+
+    loadSubsections();
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.setItem(PHOTOGRAPHY_IMAGE_SUBSECTIONS_KEY, JSON.stringify(imageSubsections)).catch((error) => {
+      console.error('Failed to save image subsections:', error);
+    });
+  }, [imageSubsections]);
+
+  useEffect(() => {
+    AsyncStorage.setItem(PHOTOGRAPHY_VIDEO_SUBSECTIONS_KEY, JSON.stringify(videoSubsections)).catch((error) => {
+      console.error('Failed to save video subsections:', error);
+    });
+  }, [videoSubsections]);
 
   const handleSaveForm = () => {
     if (!imageForm.category || !imageForm.style) {
@@ -229,6 +296,7 @@ export default function PhotographyScreen() {
       uri,
       category: imageForm.category,
       style: imageForm.style,
+      subsection: imageForm.subsection,
     }));
 
     setSavedImages(prev => [...newSavedImages, ...prev]);
@@ -291,6 +359,7 @@ export default function PhotographyScreen() {
       thumbnailUri: thumbnailResults[index],
       category: videoForm.category,
       style: videoForm.style,
+      subsection: videoForm.subsection,
     }));
 
     setSavedVideos((prev) => [...newSavedVideos, ...prev]);
@@ -325,11 +394,13 @@ export default function PhotographyScreen() {
   const resetImageFilters = () => {
     setImageFilterCategory('All');
     setImageSortBy('Newest');
+    setImageFilterSubsection('');
   };
 
   const resetVideoFilters = () => {
     setVideoFilterCategory('All');
     setVideoSortBy('Newest');
+    setVideoFilterSubsection('');
   };
 
   const isImageSelectionMode = selectedImageIds.length > 0;
@@ -583,6 +654,159 @@ export default function PhotographyScreen() {
     });
   };
 
+  const getSubsectionList = (section: SubsectionSection) => (section === 'images' ? imageSubsections : videoSubsections);
+  const setSubsectionList = (section: SubsectionSection, next: string[] | ((prev: string[]) => string[])) => {
+    if (section === 'images') {
+      setImageSubsections(next as any);
+      return;
+    }
+    setVideoSubsections(next as any);
+  };
+
+  const openSubsectionManager = (section: SubsectionSection) => {
+    setSubsectionSection(section);
+    setEditingSubsection(null);
+    setEditingSubsectionName('');
+    setNewSubsectionName('');
+    setSubsectionModalVisible(true);
+  };
+
+  const addSubsectionOption = () => {
+    const value = normalizeLabel(newSubsectionName);
+    if (!value) {
+      Alert.alert('Error', 'Subsection name cannot be empty');
+      return;
+    }
+
+    const current = getSubsectionList(subsectionSection);
+    if (current.some(item => item.toLowerCase() === value.toLowerCase())) {
+      Alert.alert('Error', 'Subsection already exists');
+      return;
+    }
+
+    setSubsectionList(subsectionSection, prev => [...prev, value]);
+    setNewSubsectionName('');
+  };
+
+  const startEditSubsectionOption = (value: string) => {
+    setEditingSubsection(value);
+    setEditingSubsectionName(value);
+  };
+
+  const saveEditedSubsectionOption = () => {
+    if (!editingSubsection) return;
+
+    const value = normalizeLabel(editingSubsectionName);
+    if (!value) {
+      Alert.alert('Error', 'Subsection name cannot be empty');
+      return;
+    }
+
+    const current = getSubsectionList(subsectionSection);
+    if (current.some(item => item.toLowerCase() === value.toLowerCase() && item.toLowerCase() !== editingSubsection.toLowerCase())) {
+      Alert.alert('Error', 'Subsection already exists');
+      return;
+    }
+
+    setSubsectionList(subsectionSection, prev => prev.map(item => (item === editingSubsection ? value : item)));
+    if (subsectionSection === 'images') {
+      setSavedImages(prev => prev.map(item => (item.subsection === editingSubsection ? { ...item, subsection: value } : item)));
+      setImageForm(prev => ({ ...prev, subsection: prev.subsection === editingSubsection ? value : prev.subsection }));
+      setImageFilterSubsection(prev => (prev === editingSubsection ? value : prev));
+    } else {
+      setSavedVideos(prev => prev.map(item => (item.subsection === editingSubsection ? { ...item, subsection: value } : item)));
+      setVideoForm(prev => ({ ...prev, subsection: prev.subsection === editingSubsection ? value : prev.subsection }));
+      setVideoFilterSubsection(prev => (prev === editingSubsection ? value : prev));
+    }
+    setEditingSubsection(null);
+    setEditingSubsectionName('');
+  };
+
+  const deleteSubsectionOption = (value: string) => {
+    Alert.alert(
+      'Delete Subsection',
+      `Delete "${value}" from ${subsectionSection === 'images' ? 'Images' : 'Videos'}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            setSubsectionList(subsectionSection, prev => prev.filter(item => item !== value));
+            if (subsectionSection === 'images') {
+              setSavedImages(prev => prev.map(item => (item.subsection === value ? { ...item, subsection: '' } : item)));
+              setImageForm(prev => ({ ...prev, subsection: prev.subsection === value ? '' : prev.subsection }));
+              setImageFilterSubsection(prev => (prev === value ? '' : prev));
+            } else {
+              setSavedVideos(prev => prev.map(item => (item.subsection === value ? { ...item, subsection: '' } : item)));
+              setVideoForm(prev => ({ ...prev, subsection: prev.subsection === value ? '' : prev.subsection }));
+              setVideoFilterSubsection(prev => (prev === value ? '' : prev));
+            }
+            if (editingSubsection === value) {
+              setEditingSubsection(null);
+              setEditingSubsectionName('');
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const renderSubsectionManager = (section: SubsectionSection) => {
+    const list = getSubsectionList(section);
+
+    return (
+      <View style={styles.subsectionBlock}>
+        <View style={styles.subsectionHeaderRow}>
+          <Text style={[styles.subsectionLabel, { color: colors.text }]}>Subsections</Text>
+          <TouchableOpacity
+            style={[styles.subsectionManageButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            onPress={() => openSubsectionManager(section)}
+          >
+            <Ionicons name="create-outline" size={14} color={colors.textSecondary} />
+            <Text style={[styles.subsectionManageButtonText, { color: colors.textSecondary }]}>Manage</Text>
+          </TouchableOpacity>
+        </View>
+
+        {list.length > 0 ? (
+          <View style={styles.subsectionChipRow}>
+            {list.map((item) => (
+              <TouchableOpacity
+                key={item}
+                onPress={() => {
+                  if (section === 'images') {
+                    setImageFilterSubsection((prev) => (prev === item ? '' : item));
+                    return;
+                  }
+                  setVideoFilterSubsection((prev) => (prev === item ? '' : item));
+                }}
+                style={[
+                  styles.subsectionChip,
+                  {
+                    backgroundColor:
+                      (section === 'images' ? imageFilterSubsection : videoFilterSubsection) === item
+                        ? colors.primary + '20'
+                        : colors.surface,
+                    borderColor:
+                      (section === 'images' ? imageFilterSubsection : videoFilterSubsection) === item
+                        ? colors.primary
+                        : colors.border,
+                  },
+                ]}
+              >
+                <Text style={[styles.subsectionChipText, { color: colors.text }]} numberOfLines={1}>
+                  {item}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : (
+          <Text style={[styles.subsectionEmptyText, { color: colors.textSecondary }]}>No subsections yet. Tap Manage to add one.</Text>
+        )}
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
@@ -665,6 +889,8 @@ export default function PhotographyScreen() {
               </TouchableOpacity>
             )}
           </View>
+
+          {renderSubsectionManager('images')}
 
           {isImageSelectionMode && (
             <Text style={[styles.selectionText, { color: colors.textSecondary }]}>
@@ -753,6 +979,8 @@ export default function PhotographyScreen() {
               </TouchableOpacity>
             )}
           </View>
+
+          {renderSubsectionManager('videos')}
 
           {isVideoSelectionMode && (
             <Text style={[styles.selectionText, { color: colors.textSecondary }]}>
@@ -850,6 +1078,22 @@ export default function PhotographyScreen() {
               placeholder="Select style"
             />
 
+            <Select
+              label="Subsection"
+              options={imageSubsections}
+              value={imageForm.subsection}
+              onChange={(subsection) => setImageForm(prev => ({ ...prev, subsection }))}
+              placeholder={imageSubsections.length > 0 ? 'Select subsection' : 'No subsections yet'}
+            />
+
+            <TouchableOpacity
+              style={[styles.manageButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={() => openSubsectionManager('images')}
+            >
+              <Ionicons name="albums-outline" size={15} color={colors.textSecondary} />
+              <Text style={[styles.manageButtonText, { color: colors.text }]}>Manage Subsections</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={[styles.manageButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
               onPress={() => setManageStyleModalVisible(true)}
@@ -911,6 +1155,22 @@ export default function PhotographyScreen() {
               onChange={(style) => setVideoForm(prev => ({ ...prev, style }))}
               placeholder="Select style"
             />
+
+            <Select
+              label="Subsection"
+              options={videoSubsections}
+              value={videoForm.subsection}
+              onChange={(subsection) => setVideoForm(prev => ({ ...prev, subsection }))}
+              placeholder={videoSubsections.length > 0 ? 'Select subsection' : 'No subsections yet'}
+            />
+
+            <TouchableOpacity
+              style={[styles.manageButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={() => openSubsectionManager('videos')}
+            >
+              <Ionicons name="albums-outline" size={15} color={colors.textSecondary} />
+              <Text style={[styles.manageButtonText, { color: colors.text }]}>Manage Subsections</Text>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.manageButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
@@ -1114,6 +1374,70 @@ export default function PhotographyScreen() {
                 setEditingStyle(null);
                 setEditingStyleName('');
                 setNewStyleName('');
+              }}
+              style={styles.optionClose}
+            >
+              <Text style={[styles.optionCloseText, { color: colors.textSecondary }]}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={subsectionModalVisible} transparent animationType="fade">
+        <View style={styles.optionOverlay}>
+          <View style={[styles.optionSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.optionTitle, { color: colors.text }]}>Manage {subsectionSection === 'images' ? 'Image' : 'Video'} Subsections</Text>
+
+            <View style={[styles.manageInputRow, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+              <TextInput
+                value={newSubsectionName}
+                onChangeText={setNewSubsectionName}
+                placeholder="New subsection"
+                placeholderTextColor={colors.textSecondary}
+                style={[styles.manageInput, { color: colors.text }]}
+              />
+              <TouchableOpacity style={[styles.manageActionButton, { backgroundColor: colors.primary }]} onPress={addSubsectionOption}>
+                <Ionicons name="add" size={16} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.manageList}>
+              {getSubsectionList(subsectionSection).map((option) => (
+                <View key={option} style={[styles.manageRow, { borderBottomColor: colors.border }]}>
+                  {editingSubsection === option ? (
+                    <TextInput
+                      value={editingSubsectionName}
+                      onChangeText={setEditingSubsectionName}
+                      style={[styles.manageEditInput, { color: colors.text, borderColor: colors.border }]}
+                    />
+                  ) : (
+                    <Text style={[styles.optionText, { color: colors.text }]}>{option}</Text>
+                  )}
+
+                  <View style={styles.manageActions}>
+                    {editingSubsection === option ? (
+                      <TouchableOpacity onPress={saveEditedSubsectionOption} style={styles.manageIconButton}>
+                        <Ionicons name="checkmark" size={18} color={colors.success} />
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity onPress={() => startEditSubsectionOption(option)} style={styles.manageIconButton}>
+                        <Ionicons name="create-outline" size={17} color={colors.textSecondary} />
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity onPress={() => deleteSubsectionOption(option)} style={styles.manageIconButton}>
+                      <Ionicons name="trash-outline" size={17} color={colors.danger} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              onPress={() => {
+                setSubsectionModalVisible(false);
+                setEditingSubsection(null);
+                setEditingSubsectionName('');
+                setNewSubsectionName('');
               }}
               style={styles.optionClose}
             >
@@ -1619,6 +1943,54 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 6,
     marginRight: 8,
+  },
+  subsectionBlock: {
+    marginBottom: 12,
+  },
+  subsectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    gap: 10,
+  },
+  subsectionLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  subsectionManageButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  subsectionManageButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  subsectionChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  subsectionChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    maxWidth: '100%',
+  },
+  subsectionChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  subsectionEmptyText: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 2,
   },
   videoList: {
     marginTop: 8,
