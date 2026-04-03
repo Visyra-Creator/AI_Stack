@@ -18,6 +18,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/src/context/ThemeContext';
 import { notesStorage, noteSectionsStorage, NoteItem as Note, NoteSection as Section, migrateNotesToRichTextFormat } from '@/src/services/storage';
 import { CLOUD_SYNC_ENABLED } from '@/src/config/runtime';
+import AdvancedRichTextEditor from '@/src/components/AdvancedRichTextEditor';
+import * as DocumentPicker from 'expo-document-picker';
+import { openUriExternally } from '@/src/services/fileOpener';
 
 export default function NotesScreen() {
   const router = useRouter();
@@ -32,9 +35,19 @@ export default function NotesScreen() {
   const [showSectionModal, setShowSectionModal] = useState(false);
   const [showManageSectionsModal, setShowManageSectionsModal] = useState(false);
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
-   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
-   const [noteContent, setNoteContent] = useState('');
-   const [editorModalVisible, setEditorModalVisible] = useState(false);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [selectedNote, setSelectedNote] = useState<Note | null>(null);
+  const [noteTitle, setNoteTitle] = useState('');
+  const [noteContent, setNoteContent] = useState('');
+  const [noteStructuredContent, setNoteStructuredContent] = useState('');
+  const [noteFiles, setNoteFiles] = useState<string[]>([]);
+  const [noteAttachmentMenuVisible, setNoteAttachmentMenuVisible] = useState(false);
+  const [noteUrlModalVisible, setNoteUrlModalVisible] = useState(false);
+  const [noteUrlMode, setNoteUrlMode] = useState<'document' | 'website'>('website');
+  const [noteUrlName, setNoteUrlName] = useState('');
+  const [noteUrlValue, setNoteUrlValue] = useState('');
+  const [editorModalVisible, setEditorModalVisible] = useState(false);
+  const [noteDetailsModalVisible, setNoteDetailsModalVisible] = useState(false);
   const [isManualSyncing, setIsManualSyncing] = useState(false);
   const [syncToast, setSyncToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const syncToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -114,6 +127,11 @@ export default function NotesScreen() {
   }, [cloudSyncEnabled, isManualSyncing, loadSections, loadNotes, showSyncToast]);
 
    const saveNote = useCallback(async () => {
+     if (!noteTitle.trim()) {
+       Alert.alert('Missing Title', 'Please enter a note title.');
+       return;
+     }
+
      if (!noteContent.trim()) {
        Alert.alert('Empty Note', 'Please enter some content for the note.');
        return;
@@ -129,20 +147,32 @@ export default function NotesScreen() {
 
        if (editingNoteId) {
          await notesStorage.update(editingNoteId, {
+            title: noteTitle.trim(),
            content: contentToSave,
-           contentVersion: 1,
-           sectionId: selectedSectionId,
+            richContent: noteStructuredContent,
+            contentVersion: 3,
+            files: noteFiles,
+            sectionId: selectedSectionId,
          });
        } else {
          await notesStorage.add({
+            title: noteTitle.trim(),
            content: contentToSave,
-           contentVersion: 1,
-           sectionId: selectedSectionId,
-           updatedAt: Date.now(),
+            richContent: noteStructuredContent,
+            contentVersion: 3,
+            files: noteFiles,
+            sectionId: selectedSectionId,
+            updatedAt: Date.now(),
          });
        }
 
+       setNoteTitle('');
        setNoteContent('');
+       setNoteStructuredContent('');
+       setNoteFiles([]);
+       setNoteAttachmentMenuVisible(false);
+       setNoteUrlValue('');
+       setNoteUrlModalVisible(false);
        setEditingNoteId(null);
        setEditorModalVisible(false);
        await loadNotes();
@@ -153,7 +183,7 @@ export default function NotesScreen() {
        console.error('Error saving note:', error);
        Alert.alert('Error', 'Failed to save note.');
      }
-   }, [noteContent, selectedSectionId, editingNoteId, loadNotes, cloudSyncEnabled]);
+   }, [noteTitle, noteContent, noteStructuredContent, noteFiles, selectedSectionId, editingNoteId, loadNotes, cloudSyncEnabled]);
 
   const deleteNote = useCallback(
     async (noteId: string) => {
@@ -323,11 +353,33 @@ export default function NotesScreen() {
     return notes.filter((note) => note.sectionId === sectionId);
   };
 
-   const editNote = (note: Note) => {
-     setEditingNoteId(note.id);
-     setNoteContent(note.content);
-     setEditorModalVisible(true);
-   };
+  const getSectionName = (sectionId: string) => {
+    return sections.find((section) => section.id === sectionId)?.name || 'Unknown section';
+  };
+
+  const getNoteTitle = (note: Note) => {
+    const rawTitle = (note as any)?.title;
+    if (typeof rawTitle === 'string' && rawTitle.trim().length > 0) {
+      return rawTitle.trim();
+    }
+    const fallback = (note.content || '').trim().split('\n')[0]?.trim();
+    return fallback || 'Untitled note';
+  };
+
+  const openNoteDetails = (note: Note) => {
+    setSelectedNote(note);
+    setNoteDetailsModalVisible(true);
+  };
+
+  const editNote = (note: Note) => {
+    setEditingNoteId(note.id);
+    setNoteTitle(getNoteTitle(note));
+    setNoteContent(note.content);
+    setNoteStructuredContent(note.richContent || '');
+    setNoteFiles(note.files || []);
+    setNoteUrlValue('');
+    setEditorModalVisible(true);
+  };
 
   const createNewNote = () => {
     if (!selectedSectionId) {
@@ -335,15 +387,129 @@ export default function NotesScreen() {
       return;
     }
     setEditingNoteId(null);
+    setNoteTitle('');
     setNoteContent('');
+    setNoteStructuredContent('');
+    setNoteFiles([]);
+    setNoteAttachmentMenuVisible(false);
+    setNoteUrlMode('website');
+    setNoteUrlName('');
+    setNoteUrlValue('');
+    setNoteUrlModalVisible(false);
     setEditorModalVisible(true);
   };
 
-   const closeEditor = () => {
-     setNoteContent('');
-     setEditingNoteId(null);
-     setEditorModalVisible(false);
-   };
+  const closeEditor = () => {
+    setNoteTitle('');
+    setNoteContent('');
+    setNoteStructuredContent('');
+    setNoteFiles([]);
+    setNoteAttachmentMenuVisible(false);
+    setNoteUrlMode('website');
+    setNoteUrlName('');
+    setNoteUrlValue('');
+    setNoteUrlModalVisible(false);
+    setEditingNoteId(null);
+    setEditorModalVisible(false);
+  };
+
+  const pickFiles = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        multiple: true,
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled && result.assets) {
+        const newFiles = result.assets
+          .map((asset) => JSON.stringify({ name: asset.name, uri: asset.uri, size: asset.size, mimeType: asset.mimeType }))
+          .filter(Boolean);
+        if (newFiles.length === 0) return;
+        setNoteFiles((prev) => [...prev, ...newFiles]);
+      }
+    } catch {
+      Alert.alert('Unable to pick files', 'Something went wrong while selecting files.');
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setNoteFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const getFileName = (fileStr: string): string => {
+    try {
+      const parsed = JSON.parse(fileStr);
+      return parsed.name || 'File';
+    } catch {
+      return 'File';
+    }
+  };
+
+  const getFileUri = (fileStr: string): string | undefined => {
+    try {
+      const parsed = JSON.parse(fileStr);
+      return parsed.uri as string | undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const openFile = async (fileStr: string) => {
+    const uri = getFileUri(fileStr);
+    if (!uri) {
+      Alert.alert('Unable to open file', 'This attachment is missing a valid file path.');
+      return;
+    }
+    const result = await openUriExternally(fileStr);
+    if (!result.success) {
+      Alert.alert('Unable to open file', result.reason || 'No app is available to open this file type.');
+    }
+  };
+
+  const deriveFileNameFromUrl = (value: string) => {
+    try {
+      const parsed = new URL(value);
+      const parts = parsed.pathname.split('/').filter(Boolean);
+      return parts[parts.length - 1] || parsed.hostname || 'Web file';
+    } catch {
+      return 'Web file';
+    }
+  };
+
+  const addUrlAttachment = () => {
+    const value = noteUrlValue.trim();
+    if (!value) {
+      Alert.alert(
+        'Invalid URL',
+        noteUrlMode === 'document' ? 'Please enter a document link.' : 'Please enter a website URL.',
+      );
+      return;
+    }
+    if (!/^https?:\/\//i.test(value)) {
+      Alert.alert(
+        'Invalid URL',
+        noteUrlMode === 'document'
+          ? 'Please enter a valid document link (http:// or https://).'
+          : 'Please enter a valid website URL (http:// or https://).',
+      );
+      return;
+    }
+
+    const nextAttachment = JSON.stringify({
+      name: noteUrlName.trim() || deriveFileNameFromUrl(value),
+      uri: value,
+      size: 0,
+    });
+
+    setNoteFiles((prev) => [...prev, nextAttachment]);
+    setNoteUrlName('');
+    setNoteUrlValue('');
+    setNoteUrlModalVisible(false);
+  };
+
+  const openAttachmentMenu = () => {
+    setNoteAttachmentMenuVisible(true);
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -474,7 +640,7 @@ export default function NotesScreen() {
             {getNotesForSection(selectedSectionId).map((note) => (
               <TouchableOpacity
                 key={note.id}
-                onPress={() => editNote(note)}
+                onPress={() => openNoteDetails(note)}
                 style={[
                   styles.noteCard,
                   { backgroundColor: colors.card, borderColor: colors.border },
@@ -485,7 +651,7 @@ export default function NotesScreen() {
                     style={[styles.noteCardTitle, { color: colors.text }]}
                     numberOfLines={2}
                   >
-                    {note.content}
+                    {getNoteTitle(note)}
                   </Text>
                   <Ionicons
                     name="chevron-forward"
@@ -546,6 +712,94 @@ export default function NotesScreen() {
         )}
       </ScrollView>
 
+      {/* Note Details Modal */}
+      <Modal
+        visible={noteDetailsModalVisible}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setNoteDetailsModalVisible(false)}
+      >
+        <SafeAreaView style={[styles.modalContainer, { backgroundColor: colors.background }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+            <TouchableOpacity onPress={() => setNoteDetailsModalVisible(false)}>
+              <Text style={[styles.modalHeaderButton, { color: colors.textSecondary }]}>Close</Text>
+            </TouchableOpacity>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Note Details</Text>
+            <View style={styles.noteDetailsActions}>
+              <TouchableOpacity
+                onPress={() => {
+                  if (!selectedNote) return;
+                  setNoteDetailsModalVisible(false);
+                  editNote(selectedNote);
+                }}
+                style={styles.noteDetailsIconButton}
+              >
+                <Ionicons name="create-outline" size={20} color={colors.primary} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  if (!selectedNote) return;
+                  const noteId = selectedNote.id;
+                  setNoteDetailsModalVisible(false);
+                  setSelectedNote(null);
+                  deleteNote(noteId);
+                }}
+                style={styles.noteDetailsIconButton}
+              >
+                <Ionicons name="trash-outline" size={20} color={colors.danger} />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <ScrollView contentContainerStyle={styles.noteDetailsContent}>
+            {selectedNote && (
+              <Text style={[styles.noteDetailsTitleText, { color: colors.text }]}>
+                {getNoteTitle(selectedNote)}
+              </Text>
+            )}
+            <View style={styles.noteDetailsMetaRow}>
+              <View style={[styles.noteDetailsMetaPill, { backgroundColor: colors.surface }]}>
+                <Text style={[styles.noteDetailsMetaText, { color: colors.textSecondary }]}>
+                  {selectedNote ? getSectionName(selectedNote.sectionId) : ''}
+                </Text>
+              </View>
+              <View style={[styles.noteDetailsMetaPill, { backgroundColor: colors.surface }]}>
+                <Text style={[styles.noteDetailsMetaText, { color: colors.textSecondary }]}>
+                  {selectedNote ? formatDateTime(selectedNote.updatedAt) : ''}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.noteDetailsEditorContainer}>
+              <AdvancedRichTextEditor
+                key={`details-${selectedNote?.id || 'none'}-${selectedNote?.updatedAt || 0}`}
+                value={selectedNote?.content || ''}
+                initialStructuredContent={selectedNote?.richContent || ''}
+                onChange={() => {}}
+                editable={false}
+              />
+            </View>
+            {selectedNote?.files && selectedNote.files.length > 0 && (
+              <View style={styles.noteFilesSection}>
+                <Text style={[styles.noteFilesLabel, { color: colors.textSecondary }]}>Documents</Text>
+                {selectedNote.files.map((file, index) => (
+                  <TouchableOpacity
+                    key={`${file}-${index}`}
+                    style={[styles.noteFileRow, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                    onPress={() => openFile(file)}
+                  >
+                    <Ionicons name="document-text-outline" size={16} color={colors.primary} />
+                    <Text style={[styles.noteFileName, { color: colors.text }]} numberOfLines={1}>
+                      {getFileName(file)}
+                    </Text>
+                    <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+           </ScrollView>
+         </SafeAreaView>
+       </Modal>
+
       {/* Editor Modal */}
       <Modal
         visible={editorModalVisible}
@@ -575,33 +829,61 @@ export default function NotesScreen() {
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 {editingNoteId ? 'Edit Note' : 'New Note'}
               </Text>
-              <TouchableOpacity onPress={saveNote}>
-                <Text style={[styles.modalHeaderButton, { color: colors.primary }]}>
-                  Save
-                </Text>
-              </TouchableOpacity>
+              <View style={styles.editorHeaderActions}>
+                <TouchableOpacity onPress={saveNote} style={styles.editorHeaderSaveButton}>
+                  <Text style={[styles.modalHeaderButton, { color: colors.primary }]}>Save</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
-             {/* Text Editor */}
-             <TextInput
-               style={[
-                 styles.noteTextInput,
-                 {
-                   backgroundColor: colors.card,
-                   color: colors.text,
-                   borderColor: colors.border,
-                 },
-               ]}
-               placeholder="Write your note here..."
-               placeholderTextColor={colors.textSecondary}
-               value={noteContent}
-               onChangeText={setNoteContent}
-               multiline
-               scrollEnabled
-               editable={true}
-             />
+            <View style={styles.noteTitleInputWrap}>
+              <TextInput
+                style={[styles.noteTitleInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+                placeholder="Note title"
+                placeholderTextColor={colors.textSecondary}
+                value={noteTitle}
+                onChangeText={setNoteTitle}
+                maxLength={120}
+              />
+            </View>
 
-             {/* Delete Button */}
+            {/* Advanced Rich Text Editor */}
+            <AdvancedRichTextEditor
+              key={`edit-${editingNoteId || 'new'}`}
+              value={noteContent}
+              initialStructuredContent={noteStructuredContent}
+              onChange={setNoteContent}
+              onChangeStructured={setNoteStructuredContent}
+              placeholder="Write your note here..."
+              editable={true}
+              onPressAttachment={openAttachmentMenu}
+              onPressLink={() => {
+                setNoteUrlMode('website');
+                setNoteUrlModalVisible(true);
+              }}
+            />
+
+            {noteFiles.length > 0 && (
+              <View style={[styles.noteFilesSection, { marginHorizontal: 24, marginTop: 10 }]}>
+                <Text style={[styles.noteFilesLabel, { color: colors.textSecondary }]}>Attachments</Text>
+                {noteFiles.map((file, index) => (
+                  <View
+                    key={`${file}-${index}`}
+                    style={[styles.noteFileRow, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                  >
+                    <Ionicons name="document-outline" size={18} color={colors.primary} />
+                    <Text style={[styles.noteFileName, { color: colors.text }]} numberOfLines={1}>
+                      {getFileName(file)}
+                    </Text>
+                    <TouchableOpacity onPress={() => removeFile(index)}>
+                      <Ionicons name="close-circle" size={20} color={colors.danger} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Delete Button */}
             {editingNoteId && (
               <TouchableOpacity
                 onPress={() => deleteNote(editingNoteId)}
@@ -618,6 +900,122 @@ export default function NotesScreen() {
             )}
           </KeyboardAvoidingView>
         </SafeAreaView>
+      </Modal>
+
+      <Modal
+        visible={noteAttachmentMenuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNoteAttachmentMenuVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View
+            nativeID="note-attachment-section"
+            style={[styles.sectionModalContent, { backgroundColor: colors.card, borderColor: colors.border }]}
+          >
+            <Text style={[styles.sectionModalTitle, { color: colors.text }]}>Add Attachment</Text>
+
+            <TouchableOpacity
+              onPress={() => {
+                setNoteAttachmentMenuVisible(false);
+                pickFiles();
+              }}
+              nativeID="note-upload-documents-button"
+              style={[styles.attachmentMenuItem, { borderColor: colors.border, backgroundColor: colors.surface }]}
+            >
+              <Ionicons name="document-attach-outline" size={18} color={colors.primary} />
+              <Text style={[styles.attachmentMenuText, { color: colors.text }]}>Upload Documents</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => {
+                setNoteAttachmentMenuVisible(false);
+                setNoteUrlMode('document');
+                setNoteUrlModalVisible(true);
+              }}
+              nativeID="note-add-url-button"
+              style={[styles.attachmentMenuItem, { borderColor: colors.border, backgroundColor: colors.surface }]}
+            >
+              <Ionicons name="link-outline" size={18} color={colors.primary} />
+              <Text style={[styles.attachmentMenuText, { color: colors.text }]}>Add Document Link</Text>
+            </TouchableOpacity>
+
+            <View style={styles.sectionModalButtons}>
+              <TouchableOpacity
+                onPress={() => setNoteAttachmentMenuVisible(false)}
+                style={[styles.sectionModalButton, { backgroundColor: colors.surface }]}
+              >
+                <Text style={[styles.sectionModalButtonText, { color: colors.text }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  setNoteAttachmentMenuVisible(false);
+                  pickFiles();
+                }}
+                style={[styles.sectionModalButton, { backgroundColor: colors.primary }]}
+              >
+                <Text style={[styles.sectionModalButtonText, { color: colors.surface }]}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={noteUrlModalVisible} transparent animationType="fade" onRequestClose={() => setNoteUrlModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View
+            nativeID="note-url-section"
+            style={[styles.sectionModalContent, { backgroundColor: colors.card, borderColor: colors.border }]}
+          >
+            <Text style={[styles.sectionModalTitle, { color: colors.text }]}>
+              {noteUrlMode === 'document' ? 'Add Document Link' : 'Add Website URL'}
+            </Text>
+            <Text style={[styles.sectionModalHint, { color: colors.textSecondary }]}>
+              {noteUrlMode === 'document'
+                ? 'Mode: Document link'
+                : 'Mode: Website URL'}
+            </Text>
+            <TextInput
+              style={[styles.sectionModalInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+              placeholder={noteUrlMode === 'document' ? 'Document name' : 'Website name (optional)'}
+              placeholderTextColor={colors.textSecondary}
+              value={noteUrlName}
+              onChangeText={setNoteUrlName}
+              autoCapitalize="words"
+              autoCorrect={false}
+            />
+            <TextInput
+              style={[styles.sectionModalInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
+              placeholder={noteUrlMode === 'document' ? 'https://example.com/document' : 'https://example.com'}
+              placeholderTextColor={colors.textSecondary}
+              value={noteUrlValue}
+              onChangeText={setNoteUrlValue}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+            />
+            <View style={styles.sectionModalButtons}>
+              <TouchableOpacity
+                onPress={() => {
+                  setNoteUrlName('');
+                  setNoteUrlValue('');
+                  setNoteUrlModalVisible(false);
+                }}
+                nativeID="note-url-cancel-button"
+                style={[styles.sectionModalButton, { backgroundColor: colors.surface }]}
+              >
+                <Text style={[styles.sectionModalButtonText, { color: colors.text }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={addUrlAttachment}
+                nativeID="note-url-add-button"
+                style={[styles.sectionModalButton, { backgroundColor: colors.primary }]}
+              >
+                <Text style={[styles.sectionModalButtonText, { color: colors.surface }]}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       </Modal>
 
       {/* Add Section Modal */}
@@ -946,6 +1344,126 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  editorHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  editorHeaderIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editorHeaderSaveButton: {
+    paddingHorizontal: 4,
+    justifyContent: 'center',
+  },
+  attachmentMenuItem: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 10,
+  },
+  attachmentMenuText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  noteDetailsActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  noteDetailsIconButton: {
+    padding: 4,
+  },
+  noteDetailsContent: {
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+    gap: 10,
+  },
+  noteDetailsTitleText: {
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  noteDetailsMetaRow: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  noteDetailsMetaPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  noteDetailsMetaText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  noteDetailsDate: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  noteDetailsText: {
+    fontSize: 15,
+    lineHeight: 24,
+    fontWeight: '400',
+  },
+  noteDetailsEditorContainer: {
+    flex: 1,
+    minHeight: 300,
+  },
+  noteFilesSection: {
+    marginTop: 10,
+    gap: 8,
+  },
+  noteFilesLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  noteUploadButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  noteUploadText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  noteFileRow: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  noteFileName: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  noteHeaderTitleContainer: {
+    flex: 1,
+    marginHorizontal: 12,
+  },
+  noteHeaderTitleInput: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+    paddingVertical: 0,
+  },
    editorContent: {
      flex: 1,
      paddingHorizontal: 24,
@@ -998,7 +1516,12 @@ const styles = StyleSheet.create({
   sectionModalTitle: {
     fontSize: 18,
     fontWeight: '700',
-    marginBottom: 16,
+    marginBottom: 6,
+  },
+  sectionModalHint: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginBottom: 14,
   },
   sectionModalInput: {
     borderWidth: 1,
@@ -1065,4 +1588,3 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
 });
-

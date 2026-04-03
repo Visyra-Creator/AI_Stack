@@ -311,7 +311,7 @@ export default function MarketingScreen() {
 
       if (!result.canceled && result.assets.length > 0) {
         const nextFiles = result.assets.map((asset) =>
-          JSON.stringify({ name: asset.name, uri: asset.uri, size: asset.size })
+          JSON.stringify({ name: asset.name, uri: asset.uri, size: asset.size, mimeType: asset.mimeType })
         );
         const merged = [...formData.files, ...nextFiles];
         setFormData({

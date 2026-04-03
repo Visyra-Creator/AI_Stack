@@ -418,7 +418,7 @@ export default function AIStackScreen() {
     }
 
     try {
-      const opened = await openUriExternally(uri);
+      const opened = await openUriExternally(fileStr);
       if (!opened.success) {
         Alert.alert('Unable to open file', 'No app available to open this file type.');
       }

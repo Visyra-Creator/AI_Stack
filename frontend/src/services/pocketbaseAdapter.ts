@@ -88,7 +88,7 @@ const resolveTitle = (item: any): string => {
       ? item.content.trim().split('\n')[0]
       : '';
   return clampText(
-    item?.toolName ?? item?.promptName ?? item?.tutorialName ?? item?.name ?? item?.sectionName ?? contentTitle ?? 'Untitled',
+    item?.title ?? item?.toolName ?? item?.promptName ?? item?.tutorialName ?? item?.name ?? item?.sectionName ?? contentTitle ?? 'Untitled',
     250
   ) || 'Untitled';
 };
@@ -106,8 +106,25 @@ const serializePayloadWithinLimit = (kind: string, payload: Record<string, any>)
   let serialized = toJson(clone);
   if (serialized.length <= MAX_RESOURCE_PAYLOAD_LENGTH) return serialized;
 
+  // Notes should keep attachment links/files whenever possible.
+  if (kind === 'notes') {
+    const noteTextKeys = ['richContent', 'content', 'description', 'instructions'];
+    for (const key of noteTextKeys) {
+      if (typeof clone[key] !== 'string') continue;
+      let value = clone[key] as string;
+      while (value.length > 80) {
+        value = value.slice(0, Math.floor(value.length * 0.7));
+        clone[key] = value;
+        serialized = toJson(clone);
+        if (serialized.length <= MAX_RESOURCE_PAYLOAD_LENGTH) return serialized;
+      }
+    }
+  }
+
   // Remove heavy binary/document reference fields first.
-  const heavyKeys = ['files', 'images', 'inputImages', 'generatedImages', 'inputImage', 'generatedImage', 'videoFile'];
+  const heavyKeys = kind === 'notes'
+    ? ['images', 'inputImages', 'generatedImages', 'inputImage', 'generatedImage', 'videoFile']
+    : ['files', 'images', 'inputImages', 'generatedImages', 'inputImage', 'generatedImage', 'videoFile'];
   for (const key of heavyKeys) {
     if (key in clone) {
       delete clone[key];
@@ -135,6 +152,7 @@ const serializePayloadWithinLimit = (kind: string, payload: Record<string, any>)
   // Final fallback keeps sync alive with essential metadata only.
   const minimal = {
     id: clone.id,
+    title: clone.title,
     createdAt: clone.createdAt,
     updatedAt: clone.updatedAt,
     type: clone.type,

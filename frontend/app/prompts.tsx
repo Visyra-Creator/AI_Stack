@@ -29,6 +29,8 @@ import { ImagePicker } from '@/src/components/common/ImagePicker';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { promptsStorage, promptsCategoryStorage, PromptItem } from '@/src/services/storage';
+import * as DocumentPicker from 'expo-document-picker';
+import { openUriExternally } from '@/src/services/fileOpener';
 
 const PROMPT_TYPES = ['general', 'personal'];
 const SORT_OPTIONS = [
@@ -76,6 +78,7 @@ export default function PromptsScreen() {
     generatedImage: undefined as string | undefined,
     inputImages: [] as string[],
     generatedImages: [] as string[],
+    files: [] as string[],
     aiToolUsed: '',
     categories: [] as string[],
     type: 'general' as 'general' | 'personal',
@@ -259,6 +262,7 @@ export default function PromptsScreen() {
       generatedImage: undefined,
       inputImages: [],
       generatedImages: [],
+      files: [],
       aiToolUsed: '',
       categories: [],
       type: activeTab,
@@ -281,6 +285,7 @@ export default function PromptsScreen() {
       generatedImage: item.generatedImage,
       inputImages: item.inputImages || [],
       generatedImages: item.generatedImages || [],
+      files: item.files || [],
       aiToolUsed: item.aiToolUsed,
       categories: item.categories || (item.category ? [item.category] : []),
       type: item.type,
@@ -355,6 +360,61 @@ export default function PromptsScreen() {
     toggleFavorite(item);
   };
 
+  const pickFiles = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        multiple: true,
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled && result.assets) {
+        const newFiles = result.assets
+          .map((asset) => JSON.stringify({ name: asset.name, uri: asset.uri, size: asset.size, mimeType: asset.mimeType }))
+          .filter(Boolean);
+        if (newFiles.length === 0) return;
+        setFormData((prev) => ({ ...prev, files: [...prev.files, ...newFiles] }));
+      }
+    } catch {
+      Alert.alert('Unable to pick files', 'Something went wrong while selecting files.');
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      files: prev.files.filter((_, i) => i !== index),
+    }));
+  };
+
+  const getFileName = (fileStr: string): string => {
+    try {
+      const parsed = JSON.parse(fileStr);
+      return parsed.name || 'File';
+    } catch {
+      return 'File';
+    }
+  };
+
+  const getFileUri = (fileStr: string): string | undefined => {
+    try {
+      const parsed = JSON.parse(fileStr);
+      return parsed.uri as string | undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const openFile = async (fileStr: string) => {
+    const uri = getFileUri(fileStr);
+    if (!uri) {
+      Alert.alert('Unable to open file', 'This attachment is missing a valid file path.');
+      return;
+    }
+    const result = await openUriExternally(fileStr);
+    if (!result.success) {
+      Alert.alert('Unable to open file', result.reason || 'No app is available to open this file type.');
+    }
+  };
 
   const baseItems = items.filter(item => item.type === activeTab);
 
@@ -780,6 +840,25 @@ export default function PromptsScreen() {
                 </View>
               )}
 
+              {selectedItem.files && selectedItem.files.length > 0 && (
+                <View style={styles.detailsSection}>
+                  <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Documents</Text>
+                  {selectedItem.files.map((file, index) => (
+                    <TouchableOpacity
+                      key={`${file}-${index}`}
+                      style={[styles.detailsFileRow, { borderColor: colors.border }]}
+                      onPress={() => openFile(file)}
+                    >
+                      <Ionicons name="document-text-outline" size={16} color={colors.primary} />
+                      <Text style={[styles.detailsFileName, { color: colors.text }]} numberOfLines={1}>
+                        {getFileName(file)}
+                      </Text>
+                      <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
               <View style={styles.bottomPadding} />
             </ScrollView>
           )}
@@ -892,6 +971,27 @@ export default function PromptsScreen() {
                   }
                 />
               )}
+            </View>
+            <View style={styles.filesSection}>
+              <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>Upload Documents</Text>
+              <TouchableOpacity
+                style={[styles.uploadButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={pickFiles}
+              >
+                <Ionicons name="document-attach-outline" size={18} color={colors.textSecondary} />
+                <Text style={[styles.uploadButtonText, { color: colors.text }]}>Add Documents</Text>
+              </TouchableOpacity>
+              {formData.files.map((file, index) => (
+                <View key={`${file}-${index}`} style={[styles.fileItem, { backgroundColor: colors.surface, borderColor: colors.border }] }>
+                  <Ionicons name="document-outline" size={20} color={colors.primary} />
+                  <Text style={[styles.fileName, { color: colors.text }]} numberOfLines={1}>
+                    {getFileName(file)}
+                  </Text>
+                  <TouchableOpacity onPress={() => removeFile(index)}>
+                    <Ionicons name="close-circle" size={20} color={colors.danger} />
+                  </TouchableOpacity>
+                </View>
+              ))}
             </View>
             <View style={styles.bottomPadding} />
           </ScrollView>
@@ -1330,6 +1430,57 @@ const styles = StyleSheet.create({
     width: 110,
     height: 110,
     borderRadius: 10,
+  },
+  detailsFileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    marginBottom: 8,
+  },
+  detailsFileName: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  filesSection: {
+    marginTop: 12,
+    marginBottom: 8,
+    gap: 8,
+  },
+  uploadLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  uploadButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  uploadButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  fileItem: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  fileName: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
   },
   categorySectionHeader: {
     marginBottom: 10,

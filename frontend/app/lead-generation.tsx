@@ -388,14 +388,14 @@ export default function LeadGenerationScreen() {
     try {
       const isPdf = fileName.toLowerCase().endsWith('.pdf') || uri.toLowerCase().includes('pdf');
       if (isPdf) {
-        const result = await openUriExternally(uri);
+        const result = await openUriExternally(fileStr);
         if (!result.success) {
           Alert.alert('Unable to open PDF', result.reason || 'No app available to open this file.');
         }
       } else if (uri.startsWith('http://') || uri.startsWith('https://')) {
         await openExternalLink(uri);
       } else {
-        const result = await openUriExternally(uri);
+        const result = await openUriExternally(fileStr);
         if (!result.success) {
           Alert.alert('Unable to open file', 'No app available to open this file.');
         }

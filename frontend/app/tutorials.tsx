@@ -30,7 +30,7 @@ import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { tutorialsStorage, TutorialItem, tutorialsCategoryStorage } from '@/src/services/storage';
 import { MultiSelect } from '@/src/components/common/MultiSelect';
-import { openUriExternally } from '@/src/services/fileOpener';
+ import { openUriExternally } from '@/src/services/fileOpener';
 import { getImageUris, getPrimaryImageUri as getResolvedPrimaryImageUri } from '@/src/services/imageResolver';
 import { CLOUD_SYNC_ENABLED } from '@/src/config/runtime';
 
@@ -364,7 +364,7 @@ export default function TutorialsScreen() {
       if (!result.canceled && result.assets) {
         const newFiles: string[] = [];
         for (const asset of result.assets) {
-          newFiles.push(JSON.stringify({ name: asset.name, uri: asset.uri, size: asset.size }));
+          newFiles.push(JSON.stringify({ name: asset.name, uri: asset.uri, size: asset.size, mimeType: asset.mimeType }));
         }
         setFormData((prev) => ({ ...prev, files: [...prev.files, ...newFiles] }));
       }
@@ -422,14 +422,14 @@ export default function TutorialsScreen() {
     try {
       const isPdf = fileName.toLowerCase().endsWith('.pdf') || uri.toLowerCase().includes('pdf');
       if (isPdf) {
-        const result = await openUriExternally(uri);
+        const result = await openUriExternally(fileStr);
         if (!result.success) {
           Alert.alert('Unable to open PDF', result.reason || 'No app is available to open this file.');
         }
       } else if (uri.startsWith('http://') || uri.startsWith('https://')) {
         await openExternalLink(uri);
       } else {
-        const result = await openUriExternally(uri);
+        const result = await openUriExternally(fileStr);
         if (!result.success) {
           Alert.alert('Unable to open file', 'No app is available to open this file.');
         }

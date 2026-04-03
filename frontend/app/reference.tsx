@@ -21,6 +21,8 @@ import { useTheme } from '@/src/context/ThemeContext';
 import { FormInput } from '@/src/components/common/FormInput';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { referenceStorage, ReferenceItem } from '@/src/services/storage';
+import * as DocumentPicker from 'expo-document-picker';
+import { openUriExternally } from '@/src/services/fileOpener';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -74,6 +76,7 @@ export default function ReferenceScreen() {
     name: '',
     link: '',
     description: '',
+    files: [] as string[],
   });
 
   const loadItems = useCallback(async () => {
@@ -92,7 +95,7 @@ export default function ReferenceScreen() {
   };
 
   const resetForm = () => {
-    setFormData({ name: '', link: '', description: '' });
+    setFormData({ name: '', link: '', description: '', files: [] });
     setEditingItem(null);
   };
 
@@ -103,7 +106,12 @@ export default function ReferenceScreen() {
 
   const openEditModal = (item: ReferenceItem) => {
     setEditingItem(item);
-    setFormData({ name: item.name, link: item.link, description: item.description });
+    setFormData({
+      name: item.name,
+      link: item.link,
+      description: item.description,
+      files: item.files || [],
+    });
     setModalVisible(true);
   };
 
@@ -141,6 +149,65 @@ export default function ReferenceScreen() {
         },
       },
     ]);
+  };
+
+  const pickFiles = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        multiple: true,
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled && result.assets) {
+        const newFiles = result.assets
+          .map(asset => JSON.stringify({ name: asset.name, uri: asset.uri, size: asset.size, mimeType: asset.mimeType }))
+          .filter(Boolean);
+
+        if (newFiles.length === 0) return;
+
+        setFormData(prev => ({ ...prev, files: [...prev.files, ...newFiles] }));
+      }
+    } catch {
+      Alert.alert('Unable to pick files', 'Something went wrong while selecting files.');
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      files: prev.files.filter((_, i) => i !== index),
+    }));
+  };
+
+  const getFileName = (fileStr: string): string => {
+    try {
+      const parsed = JSON.parse(fileStr);
+      return parsed.name || 'File';
+    } catch {
+      return 'File';
+    }
+  };
+
+  const getFileUri = (fileStr: string): string | undefined => {
+    try {
+      const parsed = JSON.parse(fileStr);
+      return parsed.uri as string | undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const openFile = async (fileStr: string) => {
+    const uri = getFileUri(fileStr);
+    if (!uri) {
+      Alert.alert('Unable to open file', 'This attachment is missing a valid file path.');
+      return;
+    }
+
+    const result = await openUriExternally(fileStr);
+    if (!result.success) {
+      Alert.alert('Unable to open file', result.reason || 'No app is available to open this file type.');
+    }
   };
 
   const toggleFavorite = async (item: ReferenceItem) => {
@@ -381,6 +448,25 @@ export default function ReferenceScreen() {
                 )}
                 <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Description</Text>
                 <Text style={[styles.mutedText, { color: colors.text }]}>{selectedItem.description || 'No description'}</Text>
+
+                  {selectedItem.files && selectedItem.files.length > 0 && (
+                    <>
+                      <Text style={[styles.detailsLabel, { color: colors.textSecondary }]}>Documents</Text>
+                      {selectedItem.files.map((file, index) => (
+                        <TouchableOpacity
+                          key={`${file}-${index}`}
+                          style={[styles.detailsFileRow, { borderColor: colors.border }]}
+                          onPress={() => openFile(file)}
+                        >
+                          <Ionicons name="document-text-outline" size={16} color={colors.primary} />
+                          <Text style={[styles.detailsFileName, { color: colors.text }]} numberOfLines={1}>
+                            {getFileName(file)}
+                          </Text>
+                          <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
+                        </TouchableOpacity>
+                      ))}
+                    </>
+                  )}
               </View>
             )}
           </View>
@@ -475,6 +561,35 @@ export default function ReferenceScreen() {
               multiline
               numberOfLines={3}
             />
+            <View style={styles.uploadSection}>
+              <Text style={[styles.uploadLabel, { color: colors.textSecondary }]}>Upload Documents</Text>
+              <TouchableOpacity
+                style={[styles.uploadButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={pickFiles}
+              >
+                <Ionicons name="document-attach-outline" size={18} color={colors.textSecondary} />
+                <Text style={[styles.uploadButtonText, { color: colors.text }]}>Add Documents</Text>
+              </TouchableOpacity>
+
+              {formData.files.length > 0 && (
+                <View style={styles.filesList}>
+                  {formData.files.map((file, index) => (
+                    <View
+                      key={`${file}-${index}`}
+                      style={[styles.fileItem, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                    >
+                      <Ionicons name="document-text-outline" size={18} color={colors.primary} />
+                      <Text style={[styles.fileName, { color: colors.text }]} numberOfLines={1}>
+                        {getFileName(file)}
+                      </Text>
+                      <TouchableOpacity onPress={() => removeFile(index)}>
+                        <Ionicons name="close-circle" size={20} color={colors.danger} />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
             <View style={styles.bottomPadding} />
           </ScrollView>
         </KeyboardAvoidingView>
@@ -617,6 +732,21 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginTop: 6,
   },
+  detailsFileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    marginTop: 6,
+  },
+  detailsFileName: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
+  },
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.35)',
@@ -640,5 +770,44 @@ const styles = StyleSheet.create({
   optionText: { fontSize: 15 },
   optionClose: { alignSelf: 'center', marginTop: 8, paddingVertical: 6 },
   optionCloseText: { fontSize: 14, fontWeight: '500' },
+  uploadSection: {
+    marginBottom: 16,
+  },
+  uploadLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 6,
+  },
+  uploadButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  uploadButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  filesList: {
+    marginTop: 10,
+    gap: 8,
+  },
+  fileItem: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  fileName: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
+  },
 });
 

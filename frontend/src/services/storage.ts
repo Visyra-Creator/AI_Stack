@@ -135,6 +135,7 @@ export interface ToolItem {
   categories?: string[];
   image?: string;
   images?: string[];
+  files?: string[];
   isFavorite?: boolean;
   createdAt: number;
   updatedAt?: number;
@@ -240,6 +241,7 @@ export interface ReferenceItem {
   name: string;
   link: string;
   description: string;
+  files?: string[];
   isFavorite?: boolean;
   createdAt: number;
   updatedAt?: number;
@@ -266,9 +268,11 @@ export interface MarketingItem {
 
 export interface NoteItem {
   id: string;
+  title?: string;
   content: string;
   richContent?: string; // HTML formatted content (optional, for backward compatibility)
-  contentVersion?: 1 | 2; // 1 = plain text, 2 = rich text with HTML
+  contentVersion?: 1 | 2 | 3; // 1 = plain text, 2 = rich text HTML, 3 = structured blocks JSON
+  files?: string[];
   sectionId: string;
   createdAt: number;
   updatedAt?: number;
@@ -311,7 +315,18 @@ function mergeByIdAndRecency<T extends { id?: string; updatedAt?: number; create
       if (incomingAny?.syncTruncated && !existingAny?.syncTruncated) {
         continue;
       }
-      mergedMap.set(item.id, item);
+      const nextItem: any = { ...incomingAny };
+      if (Array.isArray(existingAny?.files) && existingAny.files.length > 0) {
+        if (!Array.isArray(incomingAny?.files) || incomingAny.files.length === 0) {
+          nextItem.files = existingAny.files;
+        }
+      }
+      if (Array.isArray(existingAny?.images) && existingAny.images.length > 0) {
+        if (!Array.isArray(incomingAny?.images) || incomingAny.images.length === 0) {
+          nextItem.images = existingAny.images;
+        }
+      }
+      mergedMap.set(item.id, nextItem as T);
     }
   }
 
