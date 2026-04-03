@@ -1,5 +1,6 @@
 import { Linking, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
+import { startActivityAsync } from 'expo-intent-launcher';
 
 type AttachmentMeta = {
   uri?: string;
@@ -58,6 +59,46 @@ const getFileExtension = (name?: string, mimeType?: string) => {
   return '';
 };
 
+const getExtensionFromUri = (uri?: string) => {
+  if (!uri) return '';
+  try {
+    const clean = uri.split('?')[0]?.split('#')[0] ?? '';
+    const match = clean.toLowerCase().match(/\.[a-z0-9]{1,8}$/i);
+    return match?.[0] || '';
+  } catch {
+    return '';
+  }
+};
+
+const resolveMimeType = (meta?: AttachmentMeta, uri?: string) => {
+  const provided = (meta?.mimeType || '').trim().toLowerCase();
+  if (provided) return provided;
+
+  const ext = (getFileExtension(meta?.name, meta?.mimeType) || getExtensionFromUri(uri)).toLowerCase();
+  switch (ext) {
+    case '.pdf':
+      return 'application/pdf';
+    case '.doc':
+      return 'application/msword';
+    case '.docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    case '.txt':
+      return 'text/plain';
+    case '.rtf':
+      return 'application/rtf';
+    case '.xls':
+      return 'application/vnd.ms-excel';
+    case '.xlsx':
+      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    case '.ppt':
+      return 'application/vnd.ms-powerpoint';
+    case '.pptx':
+      return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    default:
+      return '*/*';
+  }
+};
+
 export const isPdfUri = (uri: string, fileName?: string) => {
   const lowerUri = uri.toLowerCase();
   const lowerName = (fileName || '').toLowerCase();
@@ -78,7 +119,9 @@ const materializeAndroidFile = async (sourceUri: string, meta?: AttachmentMeta):
   const baseDirectory = FileSystem.documentDirectory || FileSystem.cacheDirectory;
   if (!baseDirectory) return sourceUri;
 
-  const extension = getFileExtension(meta?.name, meta?.mimeType);
+  const extension =
+    getFileExtension(meta?.name, meta?.mimeType) ||
+    getExtensionFromUri(sourceUri);
   const safeName = `ai-keeper-${Date.now()}-${Math.random().toString(36).slice(2)}${extension}`;
   const targetUri = `${baseDirectory}${safeName}`;
 
@@ -94,9 +137,19 @@ const materializeAndroidFile = async (sourceUri: string, meta?: AttachmentMeta):
   }
 };
 
+const openWithAndroidIntent = async (targetUri: string, mimeType: string) => {
+  await startActivityAsync('android.intent.action.VIEW', {
+    data: targetUri,
+    type: mimeType,
+    flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
+  });
+  return true;
+};
+
 export const openUriExternally = async (uri: string): Promise<{ success: boolean; reason?: string }> => {
   const attachment = parseAttachmentValue(uri);
   const target = attachment?.uri;
+  const mimeType = resolveMimeType(attachment, target);
   if (!target) return { success: false, reason: 'URI is empty' };
 
   if (isRemoteUri(target)) {
@@ -113,7 +166,13 @@ export const openUriExternally = async (uri: string): Promise<{ success: boolean
       const materialized = await materializeAndroidFile(target, attachment);
       if (materialized?.startsWith('file://')) {
         const contentUri = await FileSystem.getContentUriAsync(materialized);
-        if (await openWithLinking(contentUri)) {
+        if (await openWithAndroidIntent(contentUri, mimeType)) {
+          return { success: true };
+        }
+      }
+
+      if (materialized?.startsWith('content://')) {
+        if (await openWithAndroidIntent(materialized, mimeType)) {
           return { success: true };
         }
       }
@@ -128,6 +187,9 @@ export const openUriExternally = async (uri: string): Promise<{ success: boolean
 
   if (target.startsWith('content://')) {
     try {
+      if (Platform.OS === 'android' && (await openWithAndroidIntent(target, mimeType))) {
+        return { success: true };
+      }
       if (await openWithLinking(target)) {
         return { success: true };
       }
@@ -139,6 +201,9 @@ export const openUriExternally = async (uri: string): Promise<{ success: boolean
   if (Platform.OS === 'android' && target.startsWith('file://')) {
     try {
       const contentUri = await FileSystem.getContentUriAsync(target);
+      if (await openWithAndroidIntent(contentUri, mimeType)) {
+        return { success: true };
+      }
       if (await openWithLinking(contentUri)) {
         return { success: true };
       }

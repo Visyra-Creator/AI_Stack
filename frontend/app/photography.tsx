@@ -55,8 +55,37 @@ const DEFAULT_STYLE_OPTIONS = [
 ];
 
 const IMAGE_SORT_OPTIONS = ['Newest', 'Oldest', 'Category', 'Style'];
+const PHOTOGRAPHY_IMAGES_KEY = 'photography_saved_images';
+const PHOTOGRAPHY_VIDEOS_KEY = 'photography_saved_videos';
+const PHOTOGRAPHY_IMAGES_BACKUP_KEY = 'photography_saved_images_backup_v1';
+const PHOTOGRAPHY_VIDEOS_BACKUP_KEY = 'photography_saved_videos_backup_v1';
+const PHOTOGRAPHY_MEDIA_MIGRATION_KEY = 'photography_media_migration_v1_done';
 const PHOTOGRAPHY_IMAGE_SUBSECTIONS_KEY = 'photography_image_subsections';
 const PHOTOGRAPHY_VIDEO_SUBSECTIONS_KEY = 'photography_video_subsections';
+
+const makeFallbackId = (prefix: 'img' | 'vid', index: number) => `${prefix}-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`;
+
+const normalizeTextField = (value: unknown, fallback: string) => {
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+};
+
+const parseLegacyUri = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed) as { uri?: string; url?: string };
+      const uri = (parsed?.uri || parsed?.url || '').trim();
+      return uri || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return trimmed;
+};
 
 type PreviewVideoPlayerProps = {
   uri: string;
@@ -96,8 +125,10 @@ export default function PhotographyScreen() {
   const [activeSection, setActiveSection] = useState<SectionId>('images');
   const [imageFormVisible, setImageFormVisible] = useState(false);
   const [savedImages, setSavedImages] = useState<SavedImage[]>([]);
+  const [hasHydratedImages, setHasHydratedImages] = useState(false);
   const [videoFormVisible, setVideoFormVisible] = useState(false);
   const [savedVideos, setSavedVideos] = useState<SavedVideo[]>([]);
+  const [hasHydratedVideos, setHasHydratedVideos] = useState(false);
   const [categoryOptions, setCategoryOptions] = useState<string[]>(DEFAULT_CATEGORY_OPTIONS);
   const [styleOptions, setStyleOptions] = useState<string[]>(DEFAULT_STYLE_OPTIONS);
   const [previewVisible, setPreviewVisible] = useState(false);
@@ -242,6 +273,172 @@ export default function PhotographyScreen() {
       videos: [],
     });
   };
+
+  useEffect(() => {
+    const loadSavedImages = async () => {
+      try {
+        const [raw, migrationDone] = await Promise.all([
+          AsyncStorage.getItem(PHOTOGRAPHY_IMAGES_KEY),
+          AsyncStorage.getItem(PHOTOGRAPHY_MEDIA_MIGRATION_KEY),
+        ]);
+        if (!raw) {
+          setHasHydratedImages(true);
+          return;
+        }
+
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+          setHasHydratedImages(true);
+          return;
+        }
+
+        let repaired = false;
+        const normalized = parsed
+          .map((item) => {
+            if (!item || typeof item !== 'object') return null;
+            const uri = parseLegacyUri((item as any).uri);
+            if (!uri) return null;
+
+            const id = typeof (item as any).id === 'string' && (item as any).id.trim().length > 0
+              ? (item as any).id.trim()
+              : makeFallbackId('img', Math.floor(Math.random() * 10000));
+            const category = normalizeTextField((item as any).category, 'Uncategorized');
+            const style = normalizeTextField((item as any).style, 'Unstyled');
+            const subsection = normalizeTextField((item as any).subsection, '');
+
+            if (
+              (item as any).id !== id ||
+              (item as any).uri !== uri ||
+              (item as any).category !== category ||
+              (item as any).style !== style ||
+              (item as any).subsection !== subsection
+            ) {
+              repaired = true;
+            }
+
+            return {
+              id,
+              uri,
+              category,
+              style,
+              subsection,
+            } as SavedImage;
+          })
+          .filter((item): item is SavedImage => !!item);
+
+        const hadDrops = normalized.length !== parsed.length;
+        if (hadDrops) repaired = true;
+
+        if (!migrationDone && repaired) {
+          await AsyncStorage.setItem(PHOTOGRAPHY_IMAGES_BACKUP_KEY, raw);
+          await AsyncStorage.setItem(PHOTOGRAPHY_IMAGES_KEY, JSON.stringify(normalized));
+        }
+
+        setSavedImages(normalized);
+      } catch (error) {
+        console.error('Failed to load saved images:', error);
+      } finally {
+        setHasHydratedImages(true);
+      }
+    };
+
+    loadSavedImages();
+  }, []);
+
+  useEffect(() => {
+    if (!hasHydratedImages) return;
+    AsyncStorage.setItem(PHOTOGRAPHY_IMAGES_KEY, JSON.stringify(savedImages)).catch((error) => {
+      console.error('Failed to save images:', error);
+    });
+  }, [savedImages, hasHydratedImages]);
+
+  useEffect(() => {
+    const loadSavedVideos = async () => {
+      try {
+        const [raw, migrationDone] = await Promise.all([
+          AsyncStorage.getItem(PHOTOGRAPHY_VIDEOS_KEY),
+          AsyncStorage.getItem(PHOTOGRAPHY_MEDIA_MIGRATION_KEY),
+        ]);
+        if (!raw) {
+          setHasHydratedVideos(true);
+          return;
+        }
+
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+          setHasHydratedVideos(true);
+          return;
+        }
+
+        let repaired = false;
+        const normalized = parsed
+          .map((item) => {
+            if (!item || typeof item !== 'object') return null;
+            const uri = parseLegacyUri((item as any).uri);
+            if (!uri) return null;
+
+            const id = typeof (item as any).id === 'string' && (item as any).id.trim().length > 0
+              ? (item as any).id.trim()
+              : makeFallbackId('vid', Math.floor(Math.random() * 10000));
+            const thumbnailUri = parseLegacyUri((item as any).thumbnailUri);
+            const category = normalizeTextField((item as any).category, 'Uncategorized');
+            const style = normalizeTextField((item as any).style, 'Unstyled');
+            const subsection = normalizeTextField((item as any).subsection, '');
+
+            if (
+              (item as any).id !== id ||
+              (item as any).uri !== uri ||
+              (item as any).thumbnailUri !== thumbnailUri ||
+              (item as any).category !== category ||
+              (item as any).style !== style ||
+              (item as any).subsection !== subsection
+            ) {
+              repaired = true;
+            }
+
+            return {
+              id,
+              uri,
+              thumbnailUri,
+              category,
+              style,
+              subsection,
+            } as SavedVideo;
+          })
+          .filter((item): item is SavedVideo => !!item);
+
+        const hadDrops = normalized.length !== parsed.length;
+        if (hadDrops) repaired = true;
+
+        if (!migrationDone && repaired) {
+          await AsyncStorage.setItem(PHOTOGRAPHY_VIDEOS_BACKUP_KEY, raw);
+          await AsyncStorage.setItem(PHOTOGRAPHY_VIDEOS_KEY, JSON.stringify(normalized));
+        }
+
+        setSavedVideos(normalized);
+      } catch (error) {
+        console.error('Failed to load saved videos:', error);
+      } finally {
+        setHasHydratedVideos(true);
+      }
+    };
+
+    loadSavedVideos();
+  }, []);
+
+  useEffect(() => {
+    if (!hasHydratedImages || !hasHydratedVideos) return;
+    AsyncStorage.setItem(PHOTOGRAPHY_MEDIA_MIGRATION_KEY, '1').catch((error) => {
+      console.error('Failed to mark media migration:', error);
+    });
+  }, [hasHydratedImages, hasHydratedVideos]);
+
+  useEffect(() => {
+    if (!hasHydratedVideos) return;
+    AsyncStorage.setItem(PHOTOGRAPHY_VIDEOS_KEY, JSON.stringify(savedVideos)).catch((error) => {
+      console.error('Failed to save videos:', error);
+    });
+  }, [savedVideos, hasHydratedVideos]);
 
   useEffect(() => {
     const loadSubsections = async () => {
