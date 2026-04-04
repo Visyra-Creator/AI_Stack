@@ -520,9 +520,7 @@ export default function TutorialsScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
+        <View style={styles.headerLeftSpacer} />
         <View style={styles.headerCenter}>
           <Text style={[styles.title, { color: colors.text }]}>Tutorials</Text>
           <Text style={[styles.syncStatusText, { color: colors.textSecondary }]}>
@@ -535,6 +533,12 @@ export default function TutorialsScreen() {
           )}
         </View>
         <View style={styles.headerActions}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={[styles.iconButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+          >
+            <Ionicons name="arrow-back" size={18} color={colors.textSecondary} />
+          </TouchableOpacity>
           {cloudSyncEnabled && (
             <TouchableOpacity
               onPress={handleManualSync}
@@ -1073,10 +1077,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
+  headerLeftSpacer: {
+    width: 36,
+    height: 36,
+  },
   headerCenter: {
     flex: 1,
     alignItems: 'center',
-    paddingHorizontal: 12,
+    justifyContent: 'center',
+    paddingHorizontal: 8,
   },
   backButton: {
     padding: 8,

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, KeyboardAvoidingView, Platform, ScrollView, Image, useWindowDimensions, FlatList, TextInput } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -71,6 +71,8 @@ const normalizeTextField = (value: unknown, fallback: string) => {
   return trimmed.length > 0 ? trimmed : fallback;
 };
 
+const normalizeSubsectionValue = (value?: string) => (value || '').trim().toLowerCase();
+
 const parseLegacyUri = (value: unknown): string | undefined => {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
@@ -111,7 +113,7 @@ function PreviewVideoPlayer({ uri, shouldPlay }: PreviewVideoPlayerProps) {
       style={styles.previewVideoPlayer}
       contentFit="contain"
       nativeControls
-      allowsFullscreen
+      fullscreenOptions={{ enable: true }}
       allowsPictureInPicture={false}
     />
   );
@@ -138,10 +140,10 @@ export default function PhotographyScreen() {
   const [selectedVideoIds, setSelectedVideoIds] = useState<string[]>([]);
   const [imageFilterCategory, setImageFilterCategory] = useState('All');
   const [imageSortBy, setImageSortBy] = useState('Newest');
-  const [imageFilterSubsection, setImageFilterSubsection] = useState('');
+  const [imageFilterSubsections, setImageFilterSubsections] = useState<string[]>([]);
   const [videoFilterCategory, setVideoFilterCategory] = useState('All');
   const [videoSortBy, setVideoSortBy] = useState('Newest');
-  const [videoFilterSubsection, setVideoFilterSubsection] = useState('');
+  const [videoFilterSubsections, setVideoFilterSubsections] = useState<string[]>([]);
   const [imageFilterModalVisible, setImageFilterModalVisible] = useState(false);
   const [imageSortModalVisible, setImageSortModalVisible] = useState(false);
   const [videoFilterModalVisible, setVideoFilterModalVisible] = useState(false);
@@ -173,6 +175,8 @@ export default function PhotographyScreen() {
     subsection: '',
     videos: [] as string[],
   });
+  const [videoFormThumbnails, setVideoFormThumbnails] = useState<(string | undefined)[]>([]);
+  const imagePreviewListRef = useRef<FlatList<SavedImage> | null>(null);
   const sections: { label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
     { label: 'Images', icon: 'images-outline' },
     { label: 'Videos', icon: 'videocam-outline' },
@@ -200,9 +204,10 @@ export default function PhotographyScreen() {
       return item.category === imageFilterCategory;
     });
 
+    const selectedSubsections = new Set(imageFilterSubsections.map((item) => normalizeSubsectionValue(item)));
     const subsectionFiltered = filtered.filter((item) => {
-      if (!imageFilterSubsection) return true;
-      return (item.subsection || '') === imageFilterSubsection;
+      if (selectedSubsections.size === 0) return true;
+      return selectedSubsections.has(normalizeSubsectionValue(item.subsection));
     });
 
     const sorted = [...subsectionFiltered];
@@ -215,7 +220,7 @@ export default function PhotographyScreen() {
     }
 
     return sorted;
-  }, [savedImages, imageFilterCategory, imageFilterSubsection, imageSortBy]);
+  }, [savedImages, imageFilterCategory, imageFilterSubsections, imageSortBy]);
 
   const displayedVideos = useMemo(() => {
     const filtered = savedVideos.filter((item) => {
@@ -223,9 +228,10 @@ export default function PhotographyScreen() {
       return item.category === videoFilterCategory;
     });
 
+    const selectedSubsections = new Set(videoFilterSubsections.map((item) => normalizeSubsectionValue(item)));
     const subsectionFiltered = filtered.filter((item) => {
-      if (!videoFilterSubsection) return true;
-      return (item.subsection || '') === videoFilterSubsection;
+      if (selectedSubsections.size === 0) return true;
+      return selectedSubsections.has(normalizeSubsectionValue(item.subsection));
     });
 
     const sorted = [...subsectionFiltered];
@@ -238,7 +244,7 @@ export default function PhotographyScreen() {
     }
 
     return sorted;
-  }, [savedVideos, videoFilterCategory, videoFilterSubsection, videoSortBy]);
+  }, [savedVideos, videoFilterCategory, videoFilterSubsections, videoSortBy]);
 
   const handleUploadPress = (section: SectionId) => {
     if (section === 'images') {
@@ -272,6 +278,7 @@ export default function PhotographyScreen() {
       subsection: '',
       videos: [],
     });
+    setVideoFormThumbnails([]);
   };
 
   useEffect(() => {
@@ -493,7 +500,7 @@ export default function PhotographyScreen() {
       uri,
       category: imageForm.category,
       style: imageForm.style,
-      subsection: imageForm.subsection,
+      subsection: imageForm.subsection.trim(),
     }));
 
     setSavedImages(prev => [...newSavedImages, ...prev]);
@@ -518,7 +525,9 @@ export default function PhotographyScreen() {
     if (result.canceled || !result.assets?.length) return;
 
     const newUris = result.assets.map((asset) => asset.uri).filter(Boolean);
+    const newThumbs = await Promise.all(newUris.map((uri) => generateVideoThumbnail(uri)));
     setVideoForm((prev) => ({ ...prev, videos: [...prev.videos, ...newUris] }));
+    setVideoFormThumbnails((prev) => [...prev, ...newThumbs]);
   };
 
   const generateVideoThumbnail = async (videoUri: string): Promise<string | undefined> => {
@@ -535,6 +544,7 @@ export default function PhotographyScreen() {
       ...prev,
       videos: prev.videos.filter((_, idx) => idx !== index),
     }));
+    setVideoFormThumbnails((prev) => prev.filter((_, idx) => idx !== index));
   };
 
   const handleSaveVideoForm = async () => {
@@ -556,7 +566,7 @@ export default function PhotographyScreen() {
       thumbnailUri: thumbnailResults[index],
       category: videoForm.category,
       style: videoForm.style,
-      subsection: videoForm.subsection,
+      subsection: videoForm.subsection.trim(),
     }));
 
     setSavedVideos((prev) => [...newSavedVideos, ...prev]);
@@ -580,24 +590,34 @@ export default function PhotographyScreen() {
   );
 
   const goToPreviousPreviewItem = () => {
-    setPreviewIndex((prev) => Math.max(0, prev - 1));
+    const nextIndex = Math.max(0, previewIndex - 1);
+    if (previewSection === 'images') {
+      imagePreviewListRef.current?.scrollToIndex({ index: nextIndex, animated: true });
+      return;
+    }
+    setPreviewIndex(nextIndex);
   };
 
   const goToNextPreviewItem = () => {
     const maxIndex = getCurrentPreviewItems().length - 1;
-    setPreviewIndex((prev) => Math.min(maxIndex, prev + 1));
+    const nextIndex = Math.min(maxIndex, previewIndex + 1);
+    if (previewSection === 'images') {
+      imagePreviewListRef.current?.scrollToIndex({ index: nextIndex, animated: true });
+      return;
+    }
+    setPreviewIndex(nextIndex);
   };
 
   const resetImageFilters = () => {
     setImageFilterCategory('All');
     setImageSortBy('Newest');
-    setImageFilterSubsection('');
+    setImageFilterSubsections([]);
   };
 
   const resetVideoFilters = () => {
     setVideoFilterCategory('All');
     setVideoSortBy('Newest');
-    setVideoFilterSubsection('');
+    setVideoFilterSubsections([]);
   };
 
   const isImageSelectionMode = selectedImageIds.length > 0;
@@ -652,6 +672,7 @@ export default function PhotographyScreen() {
 
   const handleDeleteSelectedVideos = () => {
     if (selectedVideoIds.length === 0) return;
+    const idsToDelete = [...selectedVideoIds];
     Alert.alert(
       'Delete selected videos',
       `Delete ${selectedVideoIds.length} selected video(s)?`,
@@ -661,13 +682,57 @@ export default function PhotographyScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: () => {
-            setSavedVideos((prev) => prev.filter((item) => !selectedVideoIds.includes(item.id)));
-            setSelectedVideoIds([]);
+            setSavedVideos((prev) => prev.filter((item) => !idsToDelete.includes(item.id)));
+            setSelectedVideoIds((prev) => prev.filter((id) => !idsToDelete.includes(id)));
           },
         },
       ],
     );
   };
+
+  const handleDeleteSingleVideo = (videoId: string) => {
+    Alert.alert('Delete video', 'Delete this video?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          setSavedVideos((prev) => prev.filter((item) => item.id !== videoId));
+          setSelectedVideoIds((prev) => prev.filter((id) => id !== videoId));
+        },
+      },
+    ]);
+  };
+
+  const handleDeletePreviewVideo = () => {
+    if (previewSection !== 'videos') return;
+    const currentVideo = displayedVideos[previewIndex];
+    if (!currentVideo) return;
+
+    Alert.alert('Delete video', 'Delete this video?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          setSavedVideos((prev) => prev.filter((item) => item.id !== currentVideo.id));
+          setSelectedVideoIds((prev) => prev.filter((id) => id !== currentVideo.id));
+        },
+      },
+    ]);
+  };
+
+  useEffect(() => {
+    if (!previewVisible || previewSection !== 'videos') return;
+    if (displayedVideos.length === 0) {
+      setPreviewVisible(false);
+      setPreviewIndex(0);
+      return;
+    }
+    if (previewIndex > displayedVideos.length - 1) {
+      setPreviewIndex(displayedVideos.length - 1);
+    }
+  }, [previewVisible, previewSection, displayedVideos.length, previewIndex]);
 
   const normalizeLabel = (value: string) => value.trim();
 
@@ -909,11 +974,11 @@ export default function PhotographyScreen() {
     if (subsectionSection === 'images') {
       setSavedImages(prev => prev.map(item => (item.subsection === editingSubsection ? { ...item, subsection: value } : item)));
       setImageForm(prev => ({ ...prev, subsection: prev.subsection === editingSubsection ? value : prev.subsection }));
-      setImageFilterSubsection(prev => (prev === editingSubsection ? value : prev));
+      setImageFilterSubsections(prev => prev.map(item => (item === editingSubsection ? value : item)));
     } else {
       setSavedVideos(prev => prev.map(item => (item.subsection === editingSubsection ? { ...item, subsection: value } : item)));
       setVideoForm(prev => ({ ...prev, subsection: prev.subsection === editingSubsection ? value : prev.subsection }));
-      setVideoFilterSubsection(prev => (prev === editingSubsection ? value : prev));
+      setVideoFilterSubsections(prev => prev.map(item => (item === editingSubsection ? value : item)));
     }
     setEditingSubsection(null);
     setEditingSubsectionName('');
@@ -933,11 +998,11 @@ export default function PhotographyScreen() {
             if (subsectionSection === 'images') {
               setSavedImages(prev => prev.map(item => (item.subsection === value ? { ...item, subsection: '' } : item)));
               setImageForm(prev => ({ ...prev, subsection: prev.subsection === value ? '' : prev.subsection }));
-              setImageFilterSubsection(prev => (prev === value ? '' : prev));
+              setImageFilterSubsections(prev => prev.filter(item => item !== value));
             } else {
               setSavedVideos(prev => prev.map(item => (item.subsection === value ? { ...item, subsection: '' } : item)));
               setVideoForm(prev => ({ ...prev, subsection: prev.subsection === value ? '' : prev.subsection }));
-              setVideoFilterSubsection(prev => (prev === value ? '' : prev));
+              setVideoFilterSubsections(prev => prev.filter(item => item !== value));
             }
             if (editingSubsection === value) {
               setEditingSubsection(null);
@@ -972,20 +1037,24 @@ export default function PhotographyScreen() {
                 key={item}
                 onPress={() => {
                   if (section === 'images') {
-                    setImageFilterSubsection((prev) => (prev === item ? '' : item));
+                    setImageFilterSubsections((prev) =>
+                      prev.includes(item) ? prev.filter((selected) => selected !== item) : [...prev, item],
+                    );
                     return;
                   }
-                  setVideoFilterSubsection((prev) => (prev === item ? '' : item));
+                  setVideoFilterSubsections((prev) =>
+                    prev.includes(item) ? prev.filter((selected) => selected !== item) : [...prev, item],
+                  );
                 }}
                 style={[
                   styles.subsectionChip,
                   {
                     backgroundColor:
-                      (section === 'images' ? imageFilterSubsection : videoFilterSubsection) === item
+                      (section === 'images' ? imageFilterSubsections : videoFilterSubsections).includes(item)
                         ? colors.primary + '20'
                         : colors.surface,
                     borderColor:
-                      (section === 'images' ? imageFilterSubsection : videoFilterSubsection) === item
+                      (section === 'images' ? imageFilterSubsections : videoFilterSubsections).includes(item)
                         ? colors.primary
                         : colors.border,
                   },
@@ -1003,6 +1072,9 @@ export default function PhotographyScreen() {
       </View>
     );
   };
+
+  const activePreviewItem =
+    previewSection === 'images' ? displayedImages[previewIndex] : displayedVideos[previewIndex];
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -1213,6 +1285,18 @@ export default function PhotographyScreen() {
                       activeOpacity={0.85}
                       style={[styles.videoCard, { backgroundColor: colors.surface }]}
                     >
+                      {!isVideoSelectionMode && (
+                        <TouchableOpacity
+                          style={[styles.videoDeleteButton, { backgroundColor: colors.background + 'CC' }]}
+                          onPress={(event) => {
+                            event.stopPropagation();
+                            handleDeleteSingleVideo(item.id);
+                          }}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Ionicons name="trash-outline" size={14} color={colors.danger} />
+                        </TouchableOpacity>
+                      )}
                       {item.thumbnailUri ? (
                         <Image source={{ uri: item.thumbnailUri }} style={styles.videoThumbnail} resizeMode="cover" />
                       ) : (
@@ -1275,6 +1359,14 @@ export default function PhotographyScreen() {
               placeholder="Select style"
             />
 
+            <TouchableOpacity
+              style={[styles.manageButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={() => setManageStyleModalVisible(true)}
+            >
+              <Ionicons name="settings-outline" size={15} color={colors.textSecondary} />
+              <Text style={[styles.manageButtonText, { color: colors.text }]}>Manage Styles</Text>
+            </TouchableOpacity>
+
             <Select
               label="Subsection"
               options={imageSubsections}
@@ -1289,14 +1381,6 @@ export default function PhotographyScreen() {
             >
               <Ionicons name="albums-outline" size={15} color={colors.textSecondary} />
               <Text style={[styles.manageButtonText, { color: colors.text }]}>Manage Subsections</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.manageButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
-              onPress={() => setManageStyleModalVisible(true)}
-            >
-              <Ionicons name="settings-outline" size={15} color={colors.textSecondary} />
-              <Text style={[styles.manageButtonText, { color: colors.text }]}>Manage Styles</Text>
             </TouchableOpacity>
 
             <ImagePicker
@@ -1353,6 +1437,14 @@ export default function PhotographyScreen() {
               placeholder="Select style"
             />
 
+            <TouchableOpacity
+              style={[styles.manageButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+              onPress={() => setManageStyleModalVisible(true)}
+            >
+              <Ionicons name="settings-outline" size={15} color={colors.textSecondary} />
+              <Text style={[styles.manageButtonText, { color: colors.text }]}>Manage Styles</Text>
+            </TouchableOpacity>
+
             <Select
               label="Subsection"
               options={videoSubsections}
@@ -1369,38 +1461,41 @@ export default function PhotographyScreen() {
               <Text style={[styles.manageButtonText, { color: colors.text }]}>Manage Subsections</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.manageButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
-              onPress={() => setManageStyleModalVisible(true)}
-            >
-              <Ionicons name="settings-outline" size={15} color={colors.textSecondary} />
-              <Text style={[styles.manageButtonText, { color: colors.text }]}>Manage Styles</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.uploadButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-              onPress={handlePickVideos}
-            >
-              <Ionicons name="cloud-upload-outline" size={16} color={colors.primary} />
-              <Text style={[styles.uploadButtonText, { color: colors.text }]}>Select Videos</Text>
-            </TouchableOpacity>
-
-            {videoForm.videos.length > 0 && (
-              <View style={styles.videoList}>
+            {videoForm.videos.length > 0 ? (
+              <View style={styles.videoMultiGrid}>
                 {videoForm.videos.map((uri, index) => (
-                  <View key={`${uri}-${index}`} style={[styles.videoListRow, { borderColor: colors.border }]}>
-                    <View style={styles.videoListInfo}>
-                      <Ionicons name="videocam-outline" size={16} color={colors.primary} />
-                      <Text style={[styles.videoListText, { color: colors.text }]} numberOfLines={1}>
-                        Video {index + 1}
-                      </Text>
+                  <View key={`${uri}-${index}`} style={styles.videoTileContainer}>
+                    <View style={[styles.videoTile, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+                      {videoFormThumbnails[index] ? (
+                        <Image source={{ uri: videoFormThumbnails[index] }} style={styles.videoTileThumb} resizeMode="cover" />
+                      ) : (
+                        <Ionicons name="videocam" size={22} color={colors.primary} />
+                      )}
                     </View>
-                    <TouchableOpacity onPress={() => removeVideoAt(index)}>
-                      <Ionicons name="close-circle" size={20} color={colors.danger} />
+                    <TouchableOpacity
+                      style={[styles.videoTileRemoveButton, { backgroundColor: colors.danger }]}
+                      onPress={() => removeVideoAt(index)}
+                    >
+                      <Ionicons name="close" size={14} color="#FFFFFF" />
                     </TouchableOpacity>
                   </View>
                 ))}
+                <TouchableOpacity
+                  style={[styles.videoAddMoreTile, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  onPress={handlePickVideos}
+                >
+                  <Ionicons name="add" size={24} color={colors.textSecondary} />
+                  <Text style={[styles.videoAddMoreText, { color: colors.textSecondary }]}>Add</Text>
+                </TouchableOpacity>
               </View>
+            ) : (
+              <TouchableOpacity
+                style={[styles.videoPicker, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={handlePickVideos}
+              >
+                <Ionicons name="videocam-outline" size={32} color={colors.textSecondary} />
+                <Text style={[styles.videoPickerText, { color: colors.textSecondary }]}>Tap to select videos</Text>
+              </TouchableOpacity>
             )}
 
             <View style={styles.bottomPadding} />
@@ -1750,8 +1845,18 @@ export default function PhotographyScreen() {
               <Ionicons name="close" size={20} color={colors.text} />
             </TouchableOpacity>
 
+            {previewSection === 'videos' && displayedVideos.length > 0 && (
+              <TouchableOpacity
+                style={[styles.previewDeleteButton, { backgroundColor: colors.background + 'CC' }]}
+                onPress={handleDeletePreviewVideo}
+              >
+                <Ionicons name="trash-outline" size={20} color={colors.danger} />
+              </TouchableOpacity>
+            )}
+
             {previewSection === 'images' && displayedImages.length > 0 && (
               <FlatList
+                ref={imagePreviewListRef}
                 key={`preview-${previewSection}-${previewIndex}-${(previewSection === 'images' ? displayedImages : displayedVideos).length}`}
                 data={previewSection === 'images' ? displayedImages : displayedVideos}
                 horizontal
@@ -1781,6 +1886,34 @@ export default function PhotographyScreen() {
                   </View>
                 )}
               />
+            )}
+
+            {previewSection === 'images' && displayedImages.length > 1 && (
+              <>
+                <TouchableOpacity
+                  style={[styles.previewArrowButton, styles.previewArrowLeft, { backgroundColor: colors.background + 'CC' }]}
+                  onPress={goToPreviousPreviewItem}
+                  disabled={previewIndex === 0}
+                >
+                  <Ionicons
+                    name="chevron-back"
+                    size={22}
+                    color={previewIndex === 0 ? colors.textSecondary + '66' : colors.text}
+                  />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.previewArrowButton, styles.previewArrowRight, { backgroundColor: colors.background + 'CC' }]}
+                  onPress={goToNextPreviewItem}
+                  disabled={previewIndex === displayedImages.length - 1}
+                >
+                  <Ionicons
+                    name="chevron-forward"
+                    size={22}
+                    color={previewIndex === displayedImages.length - 1 ? colors.textSecondary + '66' : colors.text}
+                  />
+                </TouchableOpacity>
+              </>
             )}
 
             {previewSection === 'videos' && displayedVideos.length > 0 && (() => {
@@ -1838,6 +1971,22 @@ export default function PhotographyScreen() {
               <Text style={[styles.previewCounter, { color: colors.textSecondary }]}>
                 {previewIndex + 1} / {(previewSection === 'images' ? displayedImages : displayedVideos).length}
               </Text>
+            )}
+
+            {activePreviewItem && (
+              <View style={styles.previewMetaContainer}>
+                <View style={styles.previewMetaPill}>
+                  <Text style={styles.previewMetaText}>{activePreviewItem.category || 'Uncategorized'}</Text>
+                </View>
+                <View style={styles.previewMetaPill}>
+                  <Text style={styles.previewMetaText}>{activePreviewItem.style || 'Unstyled'}</Text>
+                </View>
+                {!!activePreviewItem.subsection?.trim() && (
+                  <View style={styles.previewMetaPill}>
+                    <Text style={styles.previewMetaText}>{activePreviewItem.subsection.trim()}</Text>
+                  </View>
+                )}
+              </View>
             )}
           </View>
         </View>
@@ -2012,6 +2161,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     position: 'relative',
     overflow: 'hidden',
+  },
+  videoDeleteButton: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    zIndex: 3,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   videoCardText: {
     marginTop: 6,
@@ -2193,6 +2353,69 @@ const styles = StyleSheet.create({
     marginTop: 8,
     gap: 8,
   },
+  videoPicker: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderRadius: 10,
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoPickerText: {
+    marginTop: 8,
+    fontSize: 14,
+  },
+  videoMultiGrid: {
+    marginTop: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  videoTileContainer: {
+    width: 92,
+    height: 92,
+    borderRadius: 10,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  videoTile: {
+    width: '100%',
+    height: '100%',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoTileThumb: {
+    width: '100%',
+    height: '100%',
+  },
+  videoTileRemoveButton: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoAddMoreTile: {
+    width: 92,
+    height: 92,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoAddMoreText: {
+    fontSize: 11,
+    marginTop: 2,
+    fontWeight: '600',
+  },
   videoListRow: {
     borderWidth: 1,
     borderRadius: 10,
@@ -2286,10 +2509,44 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  previewDeleteButton: {
+    position: 'absolute',
+    top: 56,
+    right: 64,
+    zIndex: 2,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   previewCounter: {
     position: 'absolute',
-    bottom: 42,
+    bottom: 88,
     fontSize: 13,
+    fontWeight: '600',
+  },
+  previewMetaContainer: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    bottom: 36,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  previewMetaPill: {
+    backgroundColor: 'rgba(15, 23, 42, 0.82)',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  previewMetaText: {
+    color: '#FFFFFF',
+    fontSize: 12,
     fontWeight: '600',
   },
 });

@@ -28,6 +28,7 @@ import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { contentCreationStorage, contentCreationCategoryStorage, ContentCreationItem } from '@/src/services/storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import { openUriExternally } from '@/src/services/fileOpener';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -285,6 +286,13 @@ export default function ContentCreationScreen() {
       }
     } catch (error) {
       console.error(error);
+    }
+  };
+
+  const openAttachedFile = async (fileValue: string) => {
+    const result = await openUriExternally(fileValue);
+    if (!result.success) {
+      Alert.alert('Unable to open file', result.reason || 'No app is available to open this file.');
     }
   };
 
@@ -886,7 +894,7 @@ export default function ContentCreationScreen() {
                           <TouchableOpacity
                             key={`${parsed.uri}-${index}`}
                             style={[styles.detailsFileItem, { borderColor: colors.border, backgroundColor: colors.surface }]}
-                            onPress={() => openExternalLink(parsed.uri)}
+                            onPress={() => openAttachedFile(fileStr)}
                           >
                             <Ionicons name="document-text-outline" size={24} color={colors.primary} />
                             <Text style={[styles.detailsFileItemText, { color: colors.text }]} numberOfLines={1}>{parsed.name || 'Document'}</Text>

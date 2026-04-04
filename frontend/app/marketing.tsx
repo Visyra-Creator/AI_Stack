@@ -20,7 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import * as ImagePicker from 'expo-image-picker';
+import * as ExpoImagePicker from 'expo-image-picker';
 import { useTheme } from '@/src/context/ThemeContext';
 import { Card } from '@/src/components/common/Card';
 import { FormInput } from '@/src/components/common/FormInput';
@@ -327,7 +327,13 @@ export default function MarketingScreen() {
 
   const pickImage = async () => {
     try {
-      const result = await ImagePicker.launchImageLibraryAsync({
+      const permission = await ExpoImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission required', 'Please allow photo library access to upload images.');
+        return;
+      }
+
+      const result = await ExpoImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         allowsMultipleSelection: true,
         selectionLimit: 10,
@@ -335,24 +341,32 @@ export default function MarketingScreen() {
         quality: 0.9,
       });
 
-      if (!result.canceled && result.assets.length > 0) {
-        const nextImages = result.assets.map((asset) =>
-          JSON.stringify({
-            name: asset.fileName || `image-${Date.now()}`,
-            uri: asset.uri,
-            width: asset.width,
-            height: asset.height,
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const nextImages = result.assets
+          .map((asset) => {
+            if (!asset?.uri) return null;
+            return JSON.stringify({
+              name: asset.fileName || `image-${Date.now()}`,
+              uri: asset.uri,
+              width: asset.width,
+              height: asset.height,
+            });
           })
-        );
-        const merged = [...formData.images, ...nextImages].slice(0, 10);
-        setFormData({
-          ...formData,
-          images: merged,
-          image: merged[0],
+          .filter((image): image is string => !!image);
+
+        if (nextImages.length === 0) return;
+
+        setFormData((prev) => {
+          const merged = [...(prev.images || []), ...nextImages].slice(0, 10);
+          return {
+            ...prev,
+            images: merged,
+            image: merged[0],
+          };
         });
       }
-    } catch (error) {
-      console.log('Error picking image:', error);
+    } catch {
+      Alert.alert('Unable to pick image', 'Something went wrong while selecting images.');
     }
   };
 
@@ -368,9 +382,15 @@ export default function MarketingScreen() {
 
   const getImageUri = (imageStr?: string): string | null => {
     if (!imageStr) return null;
+    if (typeof imageStr === 'string' && !imageStr.trim().startsWith('{')) {
+      return imageStr;
+    }
     try {
       const parsed = JSON.parse(imageStr);
-      return parsed.uri || null;
+      if (typeof parsed === 'string') {
+        return parsed;
+      }
+      return parsed?.uri || null;
     } catch {
       return null;
     }
@@ -812,7 +832,13 @@ export default function MarketingScreen() {
                 <View style={styles.previewListWrap}>
                   {formData.images.map((imageStr, index) => (
                     <View key={`${imageStr.slice(0, 24)}-${index}`} style={styles.imagePreviewWrap}>
-                      <Image source={{ uri: getImageUri(imageStr) as string }} style={styles.imagePreview} resizeMode="cover" />
+                      {getImageUri(imageStr) ? (
+                        <Image source={{ uri: getImageUri(imageStr) as string }} style={styles.imagePreview} resizeMode="cover" />
+                      ) : (
+                        <View style={[styles.imagePreview, { alignItems: 'center', justifyContent: 'center' }]}>
+                          <Ionicons name="image-outline" size={18} color={colors.textSecondary} />
+                        </View>
+                      )}
                       <TouchableOpacity
                         style={[styles.imageRemoveButton, { backgroundColor: colors.background }]}
                         onPress={() => {

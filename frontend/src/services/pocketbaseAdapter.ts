@@ -429,7 +429,23 @@ export async function getPocketBaseCategories(key: string): Promise<string[]> {
     const record = await pb
       .collection('resource_categories')
       .getFirstListItem<CategoryRecord>(`kind = \"${kind}\"`);
-    return safeParse<string[]>(record.values, []);
+
+    if (Array.isArray((record as any).values)) {
+      return ((record as any).values as unknown[])
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        .map((value) => value.trim());
+    }
+
+    if (typeof record.values === 'string') {
+      const parsed = safeParse<unknown>(record.values, []);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+          .map((value) => value.trim());
+      }
+    }
+
+    return [];
   } catch {
     return [];
   }
@@ -440,16 +456,35 @@ export async function savePocketBaseCategories(key: string, categories: string[]
   const kind = CATEGORY_KEY_TO_KIND[key];
   if (!kind) return;
 
+  const normalizedCategories = Array.isArray(categories)
+    ? categories
+        .filter((category): category is string => typeof category === 'string')
+        .map((category) => category.trim())
+        .filter((category) => category.length > 0)
+    : [];
+  const values = JSON.stringify(normalizedCategories);
+
   try {
     const existing = await pb
       .collection('resource_categories')
       .getFirstListItem<CategoryRecord>(`kind = \"${kind}\"`);
-    await pb.collection('resource_categories').update(existing.id, { values: JSON.stringify(categories) });
-  } catch {
-    await pb.collection('resource_categories').create({
-      kind,
-      values: JSON.stringify(categories),
-    });
+    await pb.collection('resource_categories').update(existing.id, { values });
+  } catch (error) {
+    try {
+      await pb.collection('resource_categories').create({
+        kind,
+        values,
+      });
+    } catch {
+      // Retry as update in case create fails due unique kind conflicts/races.
+      const existing = await pb
+        .collection('resource_categories')
+        .getFirstListItem<CategoryRecord>(`kind = \"${kind}\"`);
+      await pb.collection('resource_categories').update(existing.id, { values });
+      if (isAutoCancelledError(error)) {
+        return;
+      }
+    }
   }
 }
 

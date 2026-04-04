@@ -67,24 +67,17 @@ function RootLayoutNav() {
           }}
         />
 
-        {showBackArrow && (
+        {showBackArrow && !hasLocalHomeControl && (
           <TouchableOpacity
             onPress={() => router.back()}
             style={[
               styles.backFab,
-              !hasLocalHomeControl
-                ? {
-                    bottom: insets.bottom + 16,
-                    left: 64,
-                    backgroundColor: colors.card,
-                    borderColor: colors.border,
-                  }
-                : {
-                    top: insets.top + 8,
-                    right: 16,
-                    backgroundColor: colors.card,
-                    borderColor: colors.border,
-                  },
+              {
+                bottom: insets.bottom + 16,
+                left: 64,
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
             ]}
             activeOpacity={0.9}
           >
