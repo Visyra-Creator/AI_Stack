@@ -202,9 +202,11 @@ export default function PhotographyScreen() {
   const [previewVisible, setPreviewVisible] = useState(false);
   const [previewIndex, setPreviewIndex] = useState(0);
   const [previewSection, setPreviewSection] = useState<SectionId>('images');
+  const [previewImages, setPreviewImages] = useState<SavedImage[]>([]);
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [selectedVideoIds, setSelectedVideoIds] = useState<string[]>([]);
   const [failedImageIds, setFailedImageIds] = useState<string[]>([]);
+  const [failedVideoThumbnailIds, setFailedVideoThumbnailIds] = useState<string[]>([]);
   const [imageFilterCategory, setImageFilterCategory] = useState('All');
   const [imageSortBy, setImageSortBy] = useState('Newest');
   const [imageFilterSubsections, setImageFilterSubsections] = useState<string[]>([]);
@@ -328,6 +330,7 @@ export default function PhotographyScreen() {
   useEffect(() => {
     const existingVideoIds = new Set(savedVideos.map((item) => item.id));
     setSelectedVideoIds((prev) => prev.filter((id) => existingVideoIds.has(id)));
+    setFailedVideoThumbnailIds((prev) => prev.filter((id) => existingVideoIds.has(id)));
   }, [savedVideos]);
 
   const handleUploadPress = (section: SectionId) => {
@@ -658,18 +661,47 @@ export default function PhotographyScreen() {
     if (result.canceled || !result.assets?.length) return;
 
     const newUris = result.assets.map((asset) => asset.uri).filter(Boolean);
-    const newThumbs = await Promise.all(newUris.map((uri) => generateVideoThumbnail(uri)));
+    const newThumbs = await Promise.all(
+      result.assets
+        .filter((asset) => !!asset.uri)
+        .map((asset) => {
+          const durationMs = typeof asset.duration === 'number' && Number.isFinite(asset.duration)
+            ? Math.max(0, asset.duration)
+            : 0;
+          const base = durationMs > 0 ? Math.floor(durationMs * 0.35) : 1400;
+          const preferredTimes = [
+            Math.max(400, base),
+            Math.max(700, base + 500),
+            Math.max(900, Math.floor(durationMs * 0.6) || 2000),
+            200,
+          ];
+          return generateVideoThumbnail(asset.uri!, preferredTimes);
+        }),
+    );
     setVideoForm((prev) => ({ ...prev, videos: [...prev.videos, ...newUris] }));
     setVideoFormThumbnails((prev) => [...prev, ...newThumbs]);
   };
 
-  const generateVideoThumbnail = async (videoUri: string): Promise<string | undefined> => {
-    try {
-      const result = await VideoThumbnails.getThumbnailAsync(videoUri, { time: 1000 });
-      return result?.uri;
-    } catch {
-      return undefined;
+  const generateVideoThumbnail = async (videoUri: string, preferredTimes?: number[]): Promise<string | undefined> => {
+    const candidateTimes = preferredTimes && preferredTimes.length > 0
+      ? preferredTimes
+      : [1400, 2400, 800, 200];
+
+    for (const time of candidateTimes) {
+      try {
+        const result = await VideoThumbnails.getThumbnailAsync(videoUri, {
+          time,
+          quality: 0.9,
+        });
+        if (result?.uri) {
+          return result.uri;
+        }
+      } catch {
+        // Try next timestamp.
+      }
     }
+
+    return undefined;
   };
 
   const removeVideoAt = (index: number) => {
@@ -708,7 +740,10 @@ export default function PhotographyScreen() {
     setVideoFormVisible(false);
   };
 
-  const handleOpenPreview = (index: number, section: SectionId) => {
+  const handleOpenPreview = (index: number, section: SectionId, items?: SavedImage[]) => {
+    if (section === 'images') {
+      setPreviewImages(items || displayedImages);
+    }
     setPreviewIndex(index);
     setPreviewSection(section);
     setPreviewVisible(true);
@@ -716,10 +751,11 @@ export default function PhotographyScreen() {
 
   const handleClosePreview = () => {
     setPreviewVisible(false);
+    setPreviewImages([]);
   };
 
   const getCurrentPreviewItems = () => (
-    previewSection === 'images' ? displayedImages : displayedVideos
+    previewSection === 'images' ? previewImages : displayedVideos
   );
 
   const goToPreviousPreviewItem = () => {
@@ -769,7 +805,7 @@ export default function PhotographyScreen() {
       toggleImageSelection(id);
       return;
     }
-    handleOpenPreview(index, 'images');
+    handleOpenPreview(index, 'images', displayedImages);
   };
 
   const handleImageLoadError = (item: SavedImage) => {
@@ -844,9 +880,14 @@ export default function PhotographyScreen() {
         onPress: () => {
           setSavedVideos((prev) => prev.filter((item) => item.id !== videoId));
           setSelectedVideoIds((prev) => prev.filter((id) => id !== videoId));
+          setFailedVideoThumbnailIds((prev) => prev.filter((id) => id !== videoId));
         },
       },
     ]);
+  };
+
+  const handleVideoThumbnailError = (videoId: string) => {
+    setFailedVideoThumbnailIds((prev) => (prev.includes(videoId) ? prev : [...prev, videoId]));
   };
 
   const handleDeletePreviewVideo = () => {
@@ -1233,7 +1274,7 @@ export default function PhotographyScreen() {
   };
 
   const activePreviewItem =
-    previewSection === 'images' ? displayedImages[previewIndex] : displayedVideos[previewIndex];
+    previewSection === 'images' ? previewImages[previewIndex] : displayedVideos[previewIndex];
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -1461,8 +1502,13 @@ export default function PhotographyScreen() {
                           <Ionicons name="trash-outline" size={14} color={colors.danger} />
                         </TouchableOpacity>
                       )}
-                      {item.thumbnailUri ? (
-                        <Image source={{ uri: item.thumbnailUri }} style={styles.videoThumbnail} resizeMode="cover" />
+                      {item.thumbnailUri && !failedVideoThumbnailIds.includes(item.id) ? (
+                        <Image
+                          source={{ uri: item.thumbnailUri }}
+                          style={styles.videoThumbnail}
+                          resizeMode="cover"
+                          onError={() => handleVideoThumbnailError(item.id)}
+                        />
                       ) : (
                         <>
                           <Ionicons name="videocam" size={22} color={colors.primary} />
@@ -2040,11 +2086,11 @@ export default function PhotographyScreen() {
               </TouchableOpacity>
             )}
 
-            {previewSection === 'images' && displayedImages.length > 0 && (
+            {previewSection === 'images' && previewImages.length > 0 && (
               <FlatList
                 ref={imagePreviewListRef}
-                key={`preview-${previewSection}-${previewIndex}-${(previewSection === 'images' ? displayedImages : displayedVideos).length}`}
-                data={previewSection === 'images' ? displayedImages : displayedVideos}
+                key={`preview-images-${previewImages.length}-${previewIndex}`}
+                data={previewImages}
                 horizontal
                 pagingEnabled
                 initialScrollIndex={previewIndex}
@@ -2061,8 +2107,13 @@ export default function PhotographyScreen() {
                       <Image source={{ uri: item.uri }} style={styles.previewImage} resizeMode="contain" />
                     ) : (
                       <View style={[styles.previewVideoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                        {item.thumbnailUri ? (
-                          <Image source={{ uri: item.thumbnailUri }} style={styles.previewVideoThumbnail} resizeMode="cover" />
+                        {item.thumbnailUri && !failedVideoThumbnailIds.includes(item.id) ? (
+                          <Image
+                            source={{ uri: item.thumbnailUri }}
+                            style={styles.previewVideoThumbnail}
+                            resizeMode="cover"
+                            onError={() => handleVideoThumbnailError(item.id)}
+                          />
                         ) : null}
                         <Ionicons name="videocam" size={42} color={colors.primary} />
                         <Text style={[styles.previewVideoText, { color: colors.text }]}>Video / Reel</Text>
@@ -2074,7 +2125,7 @@ export default function PhotographyScreen() {
               />
             )}
 
-            {previewSection === 'images' && displayedImages.length > 1 && (
+            {previewSection === 'images' && previewImages.length > 1 && (
               <>
                 <TouchableOpacity
                   style={[styles.previewArrowButton, styles.previewArrowLeft, { backgroundColor: colors.background + 'CC' }]}
@@ -2639,11 +2690,11 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 0,
   },
   previewImage: {
     width: '100%',
-    height: '82%',
+    height: '100%',
   },
   previewVideoCard: {
     width: '100%',
