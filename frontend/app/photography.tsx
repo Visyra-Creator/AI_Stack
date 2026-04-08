@@ -1061,6 +1061,20 @@ export default function PhotographyScreen() {
     });
   };
 
+  const moveSubsectionOption = (section: SubsectionSection, option: string, direction: 'up' | 'down') => {
+    setSubsectionList(section, (prev) => {
+      const index = prev.indexOf(option);
+      if (index === -1) return prev;
+
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev;
+
+      const next = [...prev];
+      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+      return next;
+    });
+  };
+
   const getSubsectionList = (section: SubsectionSection) => (section === 'images' ? imageSubsections : videoSubsections);
   const setSubsectionList = (section: SubsectionSection, next: string[] | ((prev: string[]) => string[])) => {
     if (section === 'images') {
@@ -1844,7 +1858,7 @@ export default function PhotographyScreen() {
             </View>
 
             <ScrollView style={styles.manageList}>
-              {getSubsectionList(subsectionSection).map((option) => (
+              {getSubsectionList(subsectionSection).map((option, index, list) => (
                 <View key={option} style={[styles.manageRow, { borderBottomColor: colors.border }]}>
                   {editingSubsection === option ? (
                     <TextInput
@@ -1857,6 +1871,28 @@ export default function PhotographyScreen() {
                   )}
 
                   <View style={styles.manageActions}>
+                    <TouchableOpacity
+                      onPress={() => moveSubsectionOption(subsectionSection, option, 'up')}
+                      style={styles.manageIconButton}
+                      disabled={index === 0}
+                    >
+                      <Ionicons
+                        name="chevron-up-outline"
+                        size={17}
+                        color={index === 0 ? colors.textSecondary + '66' : colors.textSecondary}
+                      />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => moveSubsectionOption(subsectionSection, option, 'down')}
+                      style={styles.manageIconButton}
+                      disabled={index === list.length - 1}
+                    >
+                      <Ionicons
+                        name="chevron-down-outline"
+                        size={17}
+                        color={index === list.length - 1 ? colors.textSecondary + '66' : colors.textSecondary}
+                      />
+                    </TouchableOpacity>
                     {editingSubsection === option ? (
                       <TouchableOpacity onPress={saveEditedSubsectionOption} style={styles.manageIconButton}>
                         <Ionicons name="checkmark" size={18} color={colors.success} />
