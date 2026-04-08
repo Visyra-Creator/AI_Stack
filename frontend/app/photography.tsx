@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, KeyboardAvoidingView, Platform, ScrollView, Image, useWindowDimensions, FlatList, TextInput } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, KeyboardAvoidingView, Platform, ScrollView, Image, useWindowDimensions, TextInput, PanResponder } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { Image as ExpoImage } from 'expo-image';
 import * as ExpoImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { VideoView, useVideoPlayer } from 'expo-video';
@@ -245,7 +246,6 @@ export default function PhotographyScreen() {
     videos: [] as string[],
   });
   const [videoFormThumbnails, setVideoFormThumbnails] = useState<(string | undefined)[]>([]);
-  const imagePreviewListRef = useRef<FlatList<SavedImage> | null>(null);
   const sections: { label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
     { label: 'Images', icon: 'images-outline' },
     { label: 'Videos', icon: 'videocam-outline' },
@@ -760,22 +760,39 @@ export default function PhotographyScreen() {
 
   const goToPreviousPreviewItem = () => {
     const nextIndex = Math.max(0, previewIndex - 1);
-    if (previewSection === 'images') {
-      imagePreviewListRef.current?.scrollToIndex({ index: nextIndex, animated: true });
-      return;
-    }
     setPreviewIndex(nextIndex);
   };
 
   const goToNextPreviewItem = () => {
     const maxIndex = getCurrentPreviewItems().length - 1;
     const nextIndex = Math.min(maxIndex, previewIndex + 1);
-    if (previewSection === 'images') {
-      imagePreviewListRef.current?.scrollToIndex({ index: nextIndex, animated: true });
-      return;
-    }
     setPreviewIndex(nextIndex);
   };
+
+  const imageSwipeResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) => {
+          if (previewSection !== 'images' || !previewVisible) return false;
+          const horizontalDistance = Math.abs(gestureState.dx);
+          const verticalDistance = Math.abs(gestureState.dy);
+          return horizontalDistance > verticalDistance && horizontalDistance > 18;
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          if (previewSection !== 'images') return;
+          const horizontalDistance = Math.abs(gestureState.dx);
+          const verticalDistance = Math.abs(gestureState.dy);
+          if (horizontalDistance < 48 || horizontalDistance < verticalDistance) return;
+
+          if (gestureState.dx < 0) {
+            setPreviewIndex((prev) => Math.min(Math.max(previewImages.length - 1, 0), prev + 1));
+          } else {
+            setPreviewIndex((prev) => Math.max(0, prev - 1));
+          }
+        },
+      }),
+    [previewSection, previewVisible, previewImages.length],
+  );
 
   const resetImageFilters = () => {
     setImageFilterCategory('All');
@@ -909,6 +926,18 @@ export default function PhotographyScreen() {
       },
     ]);
   };
+
+  useEffect(() => {
+    if (!previewVisible || previewSection !== 'images') return;
+    if (previewImages.length === 0) {
+      setPreviewVisible(false);
+      setPreviewIndex(0);
+      return;
+    }
+    if (previewIndex > previewImages.length - 1) {
+      setPreviewIndex(previewImages.length - 1);
+    }
+  }, [previewVisible, previewSection, previewImages.length, previewIndex]);
 
   useEffect(() => {
     if (!previewVisible || previewSection !== 'videos') return;
@@ -2094,44 +2123,21 @@ export default function PhotographyScreen() {
               </TouchableOpacity>
             )}
 
-            {previewSection === 'images' && previewImages.length > 0 && (
-              <FlatList
-                ref={imagePreviewListRef}
-                key={`preview-images-${previewImages.length}-${previewIndex}`}
-                data={previewImages}
-                horizontal
-                pagingEnabled
-                initialScrollIndex={previewIndex}
-                keyExtractor={(item) => item.id}
-                showsHorizontalScrollIndicator={false}
-                getItemLayout={(_, index) => ({ length: viewportWidth, offset: viewportWidth * index, index })}
-                onMomentumScrollEnd={(event) => {
-                  const nextIndex = Math.round(event.nativeEvent.contentOffset.x / viewportWidth);
-                  setPreviewIndex(nextIndex);
-                }}
-                renderItem={({ item, index }) => (
-                  <View style={[styles.previewPage, { width: viewportWidth }]}>
-                    {previewSection === 'images' ? (
-                      <Image source={{ uri: item.uri }} style={styles.previewImage} resizeMode="contain" />
-                    ) : (
-                      <View style={[styles.previewVideoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                        {item.thumbnailUri && !failedVideoThumbnailIds.includes(item.id) ? (
-                          <Image
-                            source={{ uri: item.thumbnailUri }}
-                            style={styles.previewVideoThumbnail}
-                            resizeMode="cover"
-                            onError={() => handleVideoThumbnailError(item.id)}
-                          />
-                        ) : null}
-                        <Ionicons name="videocam" size={42} color={colors.primary} />
-                        <Text style={[styles.previewVideoText, { color: colors.text }]}>Video / Reel</Text>
-                        <PreviewVideoPlayer uri={item.uri} shouldPlay={index === previewIndex} />
-                      </View>
-                    )}
-                  </View>
-                )}
-              />
-            )}
+            {previewSection === 'images' && previewImages.length > 0 && (() => {
+              const currentImage = previewImages[previewIndex];
+              if (!currentImage) return null;
+
+              return (
+                <View style={[styles.previewPage, { width: viewportWidth }]} {...imageSwipeResponder.panHandlers}>
+                  <ExpoImage
+                    source={{ uri: currentImage.uri }}
+                    style={styles.previewImage}
+                    contentFit="contain"
+                    transition={120}
+                  />
+                </View>
+              );
+            })()}
 
             {previewSection === 'images' && previewImages.length > 1 && (
               <>
@@ -2150,12 +2156,12 @@ export default function PhotographyScreen() {
                 <TouchableOpacity
                   style={[styles.previewArrowButton, styles.previewArrowRight, { backgroundColor: colors.background + 'CC' }]}
                   onPress={goToNextPreviewItem}
-                  disabled={previewIndex === displayedImages.length - 1}
+                  disabled={previewIndex === previewImages.length - 1}
                 >
                   <Ionicons
                     name="chevron-forward"
                     size={22}
-                    color={previewIndex === displayedImages.length - 1 ? colors.textSecondary + '66' : colors.text}
+                    color={previewIndex === previewImages.length - 1 ? colors.textSecondary + '66' : colors.text}
                   />
                 </TouchableOpacity>
               </>
@@ -2212,9 +2218,9 @@ export default function PhotographyScreen() {
               );
             })()}
 
-            {(previewSection === 'images' ? displayedImages : displayedVideos).length > 0 && (
+            {(previewSection === 'images' ? previewImages : displayedVideos).length > 0 && (
               <Text style={[styles.previewCounter, { color: colors.textSecondary }]}>
-                {previewIndex + 1} / {(previewSection === 'images' ? displayedImages : displayedVideos).length}
+                {previewIndex + 1} / {(previewSection === 'images' ? previewImages : displayedVideos).length}
               </Text>
             )}
 
