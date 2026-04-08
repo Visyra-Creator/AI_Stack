@@ -16,6 +16,7 @@ import {
   FlatList,
   useWindowDimensions,
   GestureResponderEvent,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -29,6 +30,7 @@ import { EmptyState } from '@/src/components/common/EmptyState';
 import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { leadGenerationStorage, leadGenerationCategoryStorage, LeadGenerationItem } from '@/src/services/storage';
 import { MultiSelect } from '@/src/components/common/MultiSelect';
+import { useOptimisticSave } from '@/src/hooks/useOptimisticSave';
 import { openUriExternally } from '@/src/services/fileOpener';
 import { resolveImageUri, getPrimaryImageUri as getResolvedPrimaryImageUri } from '@/src/services/imageResolver';
 
@@ -67,6 +69,21 @@ export default function LeadGenerationScreen() {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState('');
+
+  // Optimistic save hook
+  const { isSaving, executeSave } = useOptimisticSave({
+    onSaveSuccess: () => {
+      loadItems();
+    },
+    onSaveError: (error) => {
+      Alert.alert('Error', 'Failed to save. Please try again.');
+      console.error('Save error:', error);
+    },
+  });
+
+  // Loading states for other operations
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -126,15 +143,26 @@ export default function LeadGenerationScreen() {
       return;
     }
 
+    const previousCategories = categories;
     const updatedCategories = [...categories, value].sort((a, b) => {
       if (a.toLowerCase() === 'other') return 1;
       if (b.toLowerCase() === 'other') return -1;
       return a.localeCompare(b, undefined, { sensitivity: 'base' });
     });
 
-    await leadGenerationCategoryStorage.saveAll(updatedCategories);
     setCategories(updatedCategories);
     setNewCategoryName('');
+    setIsAddingCategory(true);
+
+    try {
+      await leadGenerationCategoryStorage.saveAll(updatedCategories);
+    } catch {
+      setCategories(previousCategories);
+      setNewCategoryName(value);
+      Alert.alert('Error', 'Failed to add category. Please try again.');
+    } finally {
+      setIsAddingCategory(false);
+    }
   };
 
   const startEditCategory = (category: string) => {
@@ -160,11 +188,26 @@ export default function LeadGenerationScreen() {
       return;
     }
 
+    const previousCategories = categories;
+    const previousEditingCategory = editingCategory;
+    const previousEditingCategoryName = editingCategoryName;
     const updatedCategories = categories.map((category) =>
       category === editingCategory ? value : category,
     );
-    await leadGenerationCategoryStorage.saveAll(updatedCategories);
     setCategories(updatedCategories);
+    setEditingCategory(null);
+    setEditingCategoryName('');
+
+    try {
+      await leadGenerationCategoryStorage.saveAll(updatedCategories);
+    } catch {
+      setCategories(previousCategories);
+      setEditingCategory(previousEditingCategory);
+      setEditingCategoryName(previousEditingCategoryName);
+      Alert.alert('Error', 'Failed to update category. Please try again.');
+      return;
+    }
+
     setFormData((prev) => ({
       ...prev,
       categories: prev.categories.map((category) => (category === editingCategory ? value : category)),
@@ -172,8 +215,6 @@ export default function LeadGenerationScreen() {
     if (activeFilter === editingCategory) {
       setActiveFilter(value);
     }
-    setEditingCategory(null);
-    setEditingCategoryName('');
   };
 
   const deleteCategory = (categoryToDelete: string) => {
@@ -183,22 +224,32 @@ export default function LeadGenerationScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
+          const previousCategories = categories;
+          const previousActiveFilter = activeFilter;
           const updatedCategories = categories.filter((category) => category !== categoryToDelete);
-          await leadGenerationCategoryStorage.saveAll(updatedCategories);
           setCategories(updatedCategories);
-          setFormData((prev) => {
-            const nextCategories = prev.categories.filter((category) => category !== categoryToDelete);
-            return {
-              ...prev,
-              categories: nextCategories.length > 0 ? nextCategories : [getDefaultCategory(updatedCategories)],
-            };
-          });
           if (activeFilter === categoryToDelete) {
             setActiveFilter('All');
           }
-          if (editingCategory === categoryToDelete) {
-            setEditingCategory(null);
-            setEditingCategoryName('');
+
+          try {
+            await leadGenerationCategoryStorage.saveAll(updatedCategories);
+
+            setFormData((prev) => {
+              const nextCategories = prev.categories.filter((category) => category !== categoryToDelete);
+              return {
+                ...prev,
+                categories: nextCategories.length > 0 ? nextCategories : [getDefaultCategory(updatedCategories)],
+              };
+            });
+            if (editingCategory === categoryToDelete) {
+              setEditingCategory(null);
+              setEditingCategoryName('');
+            }
+          } catch {
+            setCategories(previousCategories);
+            setActiveFilter(previousActiveFilter);
+            Alert.alert('Error', 'Failed to delete category. Please try again.');
           }
         },
       },
@@ -256,14 +307,16 @@ export default function LeadGenerationScreen() {
       return;
     }
 
-    if (editingItem) {
-      await leadGenerationStorage.update(editingItem.id, formData);
-    } else {
-      await leadGenerationStorage.add(formData);
-    }
-
-    await loadItems();
     setModalVisible(false);
+
+    await executeSave(async () => {
+      if (editingItem) {
+        await leadGenerationStorage.update(editingItem.id, formData);
+      } else {
+        await leadGenerationStorage.add(formData);
+      }
+    });
+
     resetForm();
   };
 
@@ -274,8 +327,16 @@ export default function LeadGenerationScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await leadGenerationStorage.delete(item.id);
-          await loadItems();
+          setItems(prev => prev.filter(current => current.id !== item.id));
+          setIsDeleting(item.id);
+          try {
+            await leadGenerationStorage.delete(item.id);
+          } catch {
+            await loadItems();
+            Alert.alert('Error', 'Failed to delete. Please try again.');
+          } finally {
+            setIsDeleting(null);
+          }
         },
       },
     ]);
@@ -588,6 +649,7 @@ export default function LeadGenerationScreen() {
               isFavorite={item.isFavorite ?? false}
               onEdit={() => openEditModal(item)}
               onDelete={() => handleDelete(item)}
+              isDeleteLoading={isDeleting === item.id}
             >
               <View style={styles.cardFooter}>
                 <View style={styles.metaTagsWrap}>
@@ -780,12 +842,15 @@ export default function LeadGenerationScreen() {
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               {editingItem ? 'Edit Tool' : 'Add Tool'}
             </Text>
-            <TouchableOpacity onPress={handleSave}>
-              <Text style={[styles.saveText, { color: colors.primary }]}>Save</Text>
+            <TouchableOpacity onPress={handleSave} disabled={isSaving} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {isSaving && <ActivityIndicator size="small" color={colors.primary} />}
+              <Text style={[styles.saveText, { color: isSaving ? colors.primary + '80' : colors.primary }]}>
+                {isSaving ? 'Saving...' : 'Save'}
+              </Text>
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.form} showsVerticalScrollIndicator={false} contentContainerStyle={styles.formContent}>
             <FormInput
               label="Name *"
               placeholder="e.g., LinkedIn Sales Navigator"
@@ -972,10 +1037,15 @@ export default function LeadGenerationScreen() {
                 style={[styles.categoryInput, { color: colors.text }]}
               />
               <TouchableOpacity
-                style={[styles.categoryActionButton, { backgroundColor: colors.primary }]}
+                style={[styles.categoryActionButton, { backgroundColor: colors.primary, opacity: isAddingCategory ? 0.6 : 1 }]}
                 onPress={addCategory}
+                disabled={isAddingCategory}
               >
-                <Ionicons name="add" size={16} color="#FFFFFF" />
+                {isAddingCategory ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Ionicons name="add" size={16} color="#FFFFFF" />
+                )}
               </TouchableOpacity>
             </View>
 
@@ -1221,6 +1291,9 @@ const styles = StyleSheet.create({
   form: {
     flex: 1,
     padding: 16,
+  },
+  formContent: {
+    flexGrow: 1,
   },
   detailsContent: {
     padding: 16,

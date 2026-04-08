@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/src/context/ThemeContext';
 
@@ -12,6 +12,7 @@ interface CardProps {
   isFavorite?: boolean;
   onEdit?: () => void;
   onDelete?: () => void;
+  isDeleteLoading?: boolean;
   children?: React.ReactNode;
   tags?: string[];
 }
@@ -25,6 +26,7 @@ export const Card: React.FC<CardProps> = ({
   isFavorite,
   onEdit,
   onDelete,
+  isDeleteLoading = false,
   children,
   tags,
 }) => {
@@ -82,8 +84,13 @@ export const Card: React.FC<CardProps> = ({
               }}
               style={styles.iconButton}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              disabled={isDeleteLoading}
             >
-              <Ionicons name="trash-outline" size={18} color={colors.danger} />
+              {isDeleteLoading ? (
+                <ActivityIndicator size="small" color={colors.danger} />
+              ) : (
+                <Ionicons name="trash-outline" size={18} color={colors.danger} />
+              )}
             </TouchableOpacity>
           )}
         </View>

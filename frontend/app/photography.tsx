@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, KeyboardAvoidingView, Platform, ScrollView, Image, useWindowDimensions, TextInput, PanResponder } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, KeyboardAvoidingView, Platform, ScrollView, Image, useWindowDimensions, TextInput, PanResponder, ActivityIndicator } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -246,6 +246,8 @@ export default function PhotographyScreen() {
     videos: [] as string[],
   });
   const [videoFormThumbnails, setVideoFormThumbnails] = useState<(string | undefined)[]>([]);
+  const [isSavingImageForm, setIsSavingImageForm] = useState(false);
+  const [isSavingVideoForm, setIsSavingVideoForm] = useState(false);
   const sections: { label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
     { label: 'Images', icon: 'images-outline' },
     { label: 'Videos', icon: 'videocam-outline' },
@@ -620,7 +622,7 @@ export default function PhotographyScreen() {
     });
   }, [videoSubsections]);
 
-  const handleSaveForm = () => {
+  const handleSaveForm = async () => {
     if (!imageForm.category || !imageForm.style) {
       Alert.alert('Missing details', 'Please select both category and style.');
       return;
@@ -630,19 +632,24 @@ export default function PhotographyScreen() {
       return;
     }
 
-    const timestamp = Date.now();
-    const newSavedImages = imageForm.images.map((uri, index) => ({
-      id: `${timestamp}-${index}`,
-      uri,
-      category: imageForm.category,
-      style: imageForm.style,
-      subsection: imageForm.subsection.trim(),
-    }));
+    setIsSavingImageForm(true);
+    try {
+      const timestamp = Date.now();
+      const newSavedImages = imageForm.images.map((uri, index) => ({
+        id: `${timestamp}-${index}`,
+        uri,
+        category: imageForm.category,
+        style: imageForm.style,
+        subsection: imageForm.subsection.trim(),
+      }));
 
-    setSavedImages(prev => [...newSavedImages, ...prev]);
-    Alert.alert('Saved', `${imageForm.images.length} image(s) added to Images section.`);
-    resetImageForm();
-    setImageFormVisible(false);
+      setSavedImages(prev => [...newSavedImages, ...prev]);
+      Alert.alert('Saved', `${imageForm.images.length} image(s) added to Images section.`);
+      resetImageForm();
+      setImageFormVisible(false);
+    } finally {
+      setIsSavingImageForm(false);
+    }
   };
 
   const handlePickVideos = async () => {
@@ -722,22 +729,27 @@ export default function PhotographyScreen() {
       return;
     }
 
-    const timestamp = Date.now();
-    const thumbnailResults = await Promise.all(videoForm.videos.map((uri) => generateVideoThumbnail(uri)));
+    setIsSavingVideoForm(true);
+    try {
+      const timestamp = Date.now();
+      const thumbnailResults = await Promise.all(videoForm.videos.map((uri) => generateVideoThumbnail(uri)));
 
-    const newSavedVideos = videoForm.videos.map((uri, index) => ({
-      id: `${timestamp}-${index}`,
-      uri,
-      thumbnailUri: thumbnailResults[index],
-      category: videoForm.category,
-      style: videoForm.style,
-      subsection: videoForm.subsection.trim(),
-    }));
+      const newSavedVideos = videoForm.videos.map((uri, index) => ({
+        id: `${timestamp}-${index}`,
+        uri,
+        thumbnailUri: thumbnailResults[index],
+        category: videoForm.category,
+        style: videoForm.style,
+        subsection: videoForm.subsection.trim(),
+      }));
 
-    setSavedVideos((prev) => [...newSavedVideos, ...prev]);
-    Alert.alert('Saved', `${videoForm.videos.length} video(s) added to Videos section.`);
-    resetVideoForm();
-    setVideoFormVisible(false);
+      setSavedVideos((prev) => [...newSavedVideos, ...prev]);
+      Alert.alert('Saved', `${videoForm.videos.length} video(s) added to Videos section.`);
+      resetVideoForm();
+      setVideoFormVisible(false);
+    } finally {
+      setIsSavingVideoForm(false);
+    }
   };
 
   const handleOpenPreview = (index: number, section: SectionId, items?: SavedImage[]) => {
@@ -1570,14 +1582,15 @@ export default function PhotographyScreen() {
               <Text style={[styles.modalActionText, { color: colors.textSecondary }]}>Cancel</Text>
             </TouchableOpacity>
             <Text style={[styles.modalTitle, { color: colors.text }]}>Upload Images</Text>
-            <TouchableOpacity onPress={handleSaveForm}>
-              <Text style={[styles.modalActionText, { color: colors.primary }]}>Save</Text>
-            </TouchableOpacity>
-          </View>
+             <TouchableOpacity onPress={handleSaveForm} disabled={isSavingImageForm} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+               {isSavingImageForm && <ActivityIndicator size="small" color={colors.primary} />}
+               <Text style={[styles.modalActionText, { color: isSavingImageForm ? colors.primary + '80' : colors.primary }]}>{isSavingImageForm ? 'Saving...' : 'Save'}</Text>
+             </TouchableOpacity>
+           </View>
 
-          <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
-            <Select
-              label="Category"
+           <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalBodyContent}>
+             <Select
+               label="Category"
               options={categoryOptions}
               value={imageForm.category}
               onChange={(category) => setImageForm(prev => ({ ...prev, category }))}
@@ -1648,16 +1661,17 @@ export default function PhotographyScreen() {
               <Text style={[styles.modalActionText, { color: colors.textSecondary }]}>Cancel</Text>
             </TouchableOpacity>
             <Text style={[styles.modalTitle, { color: colors.text }]}>Upload Videos</Text>
-            <TouchableOpacity onPress={handleSaveVideoForm}>
-              <Text style={[styles.modalActionText, { color: colors.primary }]}>Save</Text>
-            </TouchableOpacity>
-          </View>
+             <TouchableOpacity onPress={handleSaveVideoForm} disabled={isSavingVideoForm} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+               {isSavingVideoForm && <ActivityIndicator size="small" color={colors.primary} />}
+               <Text style={[styles.modalActionText, { color: isSavingVideoForm ? colors.primary + '80' : colors.primary }]}>{isSavingVideoForm ? 'Saving...' : 'Save'}</Text>
+             </TouchableOpacity>
+           </View>
 
-          <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
-            <Select
-              label="Category"
-              options={categoryOptions}
-              value={videoForm.category}
+           <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalBodyContent}>
+             <Select
+               label="Category"
+               options={categoryOptions}
+               value={videoForm.category}
               onChange={(category) => setVideoForm(prev => ({ ...prev, category }))}
               placeholder="Select category"
             />
@@ -2465,6 +2479,9 @@ const styles = StyleSheet.create({
   modalBody: {
     flex: 1,
     padding: 16,
+  },
+  modalBodyContent: {
+    flexGrow: 1,
   },
   bottomPadding: {
     height: 40,

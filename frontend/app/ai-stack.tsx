@@ -16,6 +16,7 @@ import {
   FlatList,
   useWindowDimensions,
   GestureResponderEvent,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -32,6 +33,7 @@ import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { aiStackStorage, aiStackCategoryStorage, AIStackItem } from '@/src/services/storage';
 import { openUriExternally } from '@/src/services/fileOpener';
 import { resolveImageUri, getPrimaryImageUri as getResolvedPrimaryImageUri } from '@/src/services/imageResolver';
+import { useOptimisticSave } from '@/src/hooks/useOptimisticSave';
 
 const PRICING_OPTIONS = ['free', 'paid', 'freemium'];
 const SORT_OPTIONS = [
@@ -67,6 +69,19 @@ export default function AIStackScreen() {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState('');
+
+  // Optimistic save hook
+  const { isSaving, executeSave } = useOptimisticSave({
+    onSaveSuccess: () => {
+      loadItems();
+    },
+    onSaveError: (error) => {
+      Alert.alert('Error', 'Failed to save. Please try again.');
+      console.error('Save error:', error);
+    },
+  });
+
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     toolName: '',
@@ -282,22 +297,26 @@ export default function AIStackScreen() {
     openEditModal(selectedItem);
   };
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     if (!formData.toolName.trim()) {
       Alert.alert('Error', 'Tool name is required');
       return;
     }
 
-    if (editingItem) {
-      await aiStackStorage.update(editingItem.id, formData);
-    } else {
-      await aiStackStorage.add(formData);
-    }
-
-    await loadItems();
+    // Optimistic: Close modal immediately
     setModalVisible(false);
+
+    // Save in background (non-blocking)
+    await executeSave(async () => {
+      if (editingItem) {
+        await aiStackStorage.update(editingItem.id, formData);
+      } else {
+        await aiStackStorage.add(formData);
+      }
+    });
+
     resetForm();
-  };
+  }, [formData, editingItem, executeSave]);
 
   const handleDelete = (item: AIStackItem) => {
     Alert.alert('Delete', `Are you sure you want to delete "${item.toolName}"?`, [
@@ -306,8 +325,16 @@ export default function AIStackScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await aiStackStorage.delete(item.id);
-          await loadItems();
+          setItems(prev => prev.filter(current => current.id !== item.id));
+          setIsDeleting(item.id);
+          try {
+            await aiStackStorage.delete(item.id);
+          } catch {
+            await loadItems();
+            Alert.alert('Error', 'Failed to delete. Please try again.');
+          } finally {
+            setIsDeleting(null);
+          }
         },
       },
     ]);
@@ -639,6 +666,7 @@ export default function AIStackScreen() {
               isFavorite={item.isFavorite ?? false}
               onEdit={() => openEditModal(item)}
               onDelete={() => handleDelete(item)}
+              isDeleteLoading={isDeleting === item.id}
             >
               <View style={styles.cardFooter}>
                 <View style={styles.metaTagsWrap}>
@@ -880,18 +908,21 @@ export default function AIStackScreen() {
           style={[styles.modalContainer, { backgroundColor: colors.background }]}
         >
           <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-            <TouchableOpacity onPress={() => { setModalVisible(false); resetForm(); }}>
-              <Text style={[styles.cancelText, { color: colors.textSecondary }]}>Cancel</Text>
+            <TouchableOpacity onPress={() => { setModalVisible(false); resetForm(); }} disabled={isSaving}>
+              <Text style={[styles.cancelText, { color: isSaving ? colors.textSecondary + '80' : colors.textSecondary }]}>Cancel</Text>
             </TouchableOpacity>
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               {editingItem ? 'Edit Tool' : 'Add Tool'}
             </Text>
-            <TouchableOpacity onPress={handleSave}>
-              <Text style={[styles.saveText, { color: colors.primary }]}>Save</Text>
+            <TouchableOpacity onPress={handleSave} disabled={isSaving} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {isSaving && <ActivityIndicator size="small" color={colors.primary} />}
+              <Text style={[styles.saveText, { color: isSaving ? colors.primary + '80' : colors.primary }]}>
+                {isSaving ? 'Saving...' : 'Save'}
+              </Text>
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.form} showsVerticalScrollIndicator={false} contentContainerStyle={styles.formContent}>
             <FormInput
               label="Tool Name *"
               placeholder="e.g., ChatGPT, Midjourney"
@@ -1370,6 +1401,9 @@ const styles = StyleSheet.create({
   form: {
     flex: 1,
     padding: 16,
+  },
+  formContent: {
+    flexGrow: 1,
   },
   detailsScroll: {
     flex: 1,

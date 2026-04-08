@@ -16,6 +16,7 @@ import {
   FlatList,
   GestureResponderEvent,
   Linking,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -31,6 +32,7 @@ import { DoubleTapImage } from '@/src/components/common/DoubleTapImage';
 import { promptsStorage, promptsCategoryStorage, PromptItem } from '@/src/services/storage';
 import * as DocumentPicker from 'expo-document-picker';
 import { openUriExternally } from '@/src/services/fileOpener';
+import { useOptimisticSave } from '@/src/hooks/useOptimisticSave';
 
 const PROMPT_TYPES = ['general', 'personal'];
 const SORT_OPTIONS = [
@@ -69,6 +71,19 @@ export default function PromptsScreen() {
   const [editingCategoryName, setEditingCategoryName] = useState('');
   const [actionToast, setActionToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const actionToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Optimistic save hook
+  const { isSaving, executeSave } = useOptimisticSave({
+    onSaveSuccess: () => {
+      loadItems();
+    },
+    onSaveError: (error) => {
+      Alert.alert('Error', 'Failed to save. Please try again.');
+      console.error('Save error:', error);
+    },
+  });
+
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     promptName: '',
@@ -298,7 +313,7 @@ export default function PromptsScreen() {
     setDetailsVisible(true);
   };
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     if (!formData.promptName.trim()) {
       Alert.alert('Error', 'Prompt name is required');
       return;
@@ -315,16 +330,20 @@ export default function PromptsScreen() {
       generatedImage: formData.generatedImages[0],
     };
 
-    if (editingItem) {
-      await promptsStorage.update(editingItem.id, payload);
-    } else {
-      await promptsStorage.add(payload);
-    }
-
-    await loadItems();
+    // Optimistic: Close modal immediately
     setModalVisible(false);
+
+    // Save in background (non-blocking)
+    await executeSave(async () => {
+      if (editingItem) {
+        await promptsStorage.update(editingItem.id, payload);
+      } else {
+        await promptsStorage.add(payload);
+      }
+    });
+
     resetForm();
-  };
+  }, [formData, editingItem, executeSave]);
 
   const handleDelete = (item: PromptItem) => {
     Alert.alert('Delete', `Are you sure you want to delete "${item.promptName}"?`, [
@@ -333,6 +352,7 @@ export default function PromptsScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
+          setIsDeleting(item.id);
           try {
             await promptsStorage.delete(item.id);
             setItems(prev => prev.filter(current => current.id !== item.id));
@@ -343,6 +363,8 @@ export default function PromptsScreen() {
             showActionToast('Prompt deleted', 'success');
           } catch {
             showActionToast('Delete failed', 'error');
+          } finally {
+            setIsDeleting(null);
           }
         },
       },
@@ -696,6 +718,7 @@ export default function PromptsScreen() {
               isFavorite={item.isFavorite ?? false}
               onEdit={() => openEditModal(item)}
               onDelete={() => handleDelete(item)}
+              isDeleteLoading={isDeleting === item.id}
             >
               <View style={styles.cardFooter}>
                 <View style={styles.metaTagsWrap}>
@@ -871,18 +894,21 @@ export default function PromptsScreen() {
           style={[styles.modalContainer, { backgroundColor: colors.background }]}
         >
           <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-            <TouchableOpacity onPress={() => { setModalVisible(false); resetForm(); }}>
-              <Text style={[styles.cancelText, { color: colors.textSecondary }]}>Cancel</Text>
+            <TouchableOpacity onPress={() => { setModalVisible(false); resetForm(); }} disabled={isSaving}>
+              <Text style={[styles.cancelText, { color: isSaving ? colors.textSecondary + '80' : colors.textSecondary }]}>Cancel</Text>
             </TouchableOpacity>
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               {editingItem ? 'Edit Prompt' : 'Add Prompt'}
             </Text>
-            <TouchableOpacity onPress={handleSave}>
-              <Text style={[styles.saveText, { color: colors.primary }]}>Save</Text>
+            <TouchableOpacity onPress={handleSave} disabled={isSaving} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {isSaving && <ActivityIndicator size="small" color={colors.primary} />}
+              <Text style={[styles.saveText, { color: isSaving ? colors.primary + '80' : colors.primary }]}>
+                {isSaving ? 'Saving...' : 'Save'}
+              </Text>
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.form} showsVerticalScrollIndicator={false} contentContainerStyle={styles.formContent}>
             <FormInput
               label="Prompt Name *"
               placeholder="Give your prompt a name"
@@ -1377,6 +1403,9 @@ const styles = StyleSheet.create({
   form: {
     flex: 1,
     padding: 16,
+  },
+  formContent: {
+    flexGrow: 1,
   },
   textArea: {
     minHeight: 150,

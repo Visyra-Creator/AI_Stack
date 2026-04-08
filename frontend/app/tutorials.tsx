@@ -16,6 +16,7 @@ import {
   useWindowDimensions,
   GestureResponderEvent,
   Linking,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -33,6 +34,7 @@ import { MultiSelect } from '@/src/components/common/MultiSelect';
  import { openUriExternally } from '@/src/services/fileOpener';
 import { getImageUris, getPrimaryImageUri as getResolvedPrimaryImageUri } from '@/src/services/imageResolver';
 import { CLOUD_SYNC_ENABLED } from '@/src/config/runtime';
+import { useOptimisticSave } from '@/src/hooks/useOptimisticSave';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -73,6 +75,20 @@ export default function TutorialsScreen() {
   const [isManualSyncing, setIsManualSyncing] = useState(false);
   const [syncToast, setSyncToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const syncToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Optimistic save hook
+  const { isSaving, executeSave } = useOptimisticSave({
+    onSaveSuccess: () => {
+      loadItems();
+    },
+    onSaveError: (error) => {
+      Alert.alert('Error', 'Failed to save. Please try again.');
+      console.error('Save error:', error);
+    },
+  });
+
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
 
   const showSyncToast = useCallback((text: string, type: 'success' | 'error') => {
     if (syncToastTimerRef.current) {
@@ -154,14 +170,25 @@ export default function TutorialsScreen() {
       return;
     }
 
+    const previousCategories = categories;
     const updatedCategories = [...categories, value].sort((a, b) => {
       if (a.toLowerCase() === 'other') return 1;
       if (b.toLowerCase() === 'other') return -1;
       return a.localeCompare(b, undefined, { sensitivity: 'base' });
     });
-    await tutorialsCategoryStorage.saveAll(updatedCategories);
     setCategories(updatedCategories);
     setNewCategoryName('');
+
+    setIsAddingCategory(true);
+    try {
+      await tutorialsCategoryStorage.saveAll(updatedCategories);
+    } catch {
+      setCategories(previousCategories);
+      setNewCategoryName(value);
+      Alert.alert('Error', 'Failed to add category. Please try again.');
+    } finally {
+      setIsAddingCategory(false);
+    }
   };
 
   const startEditCategory = (category: string) => {
@@ -187,11 +214,26 @@ export default function TutorialsScreen() {
       return;
     }
 
+    const previousCategories = categories;
+    const previousEditingCategory = editingCategory;
+    const previousEditingCategoryName = editingCategoryName;
     const updatedCategories = categories.map((category) =>
       category === editingCategory ? value : category,
     );
-    await tutorialsCategoryStorage.saveAll(updatedCategories);
     setCategories(updatedCategories);
+    setEditingCategory(null);
+    setEditingCategoryName('');
+
+    try {
+      await tutorialsCategoryStorage.saveAll(updatedCategories);
+    } catch {
+      setCategories(previousCategories);
+      setEditingCategory(previousEditingCategory);
+      setEditingCategoryName(previousEditingCategoryName);
+      Alert.alert('Error', 'Failed to update category. Please try again.');
+      return;
+    }
+
     setFormData((prev) => ({
       ...prev,
       categories: prev.categories.map((category) => (category === editingCategory ? value : category)),
@@ -199,8 +241,6 @@ export default function TutorialsScreen() {
     if (activeFilter === editingCategory) {
       setActiveFilter(value);
     }
-    setEditingCategory(null);
-    setEditingCategoryName('');
   };
 
   const deleteCategory = (categoryToDelete: string) => {
@@ -210,10 +250,14 @@ export default function TutorialsScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
+          const previousCategories = categories;
+          const previousActiveFilter = activeFilter;
           const updatedCategories = categories.filter((category) => category !== categoryToDelete);
           const fallback = getDefaultCategory(updatedCategories);
-          await tutorialsCategoryStorage.saveAll(updatedCategories);
           setCategories(updatedCategories);
+          if (activeFilter === categoryToDelete) {
+            setActiveFilter('All');
+          }
           setFormData((prev) => {
             const nextCategories = prev.categories.filter((category) => category !== categoryToDelete);
             return {
@@ -221,12 +265,17 @@ export default function TutorialsScreen() {
               categories: nextCategories.length > 0 ? nextCategories : [fallback],
             };
           });
-          if (activeFilter === categoryToDelete) {
-            setActiveFilter('All');
-          }
           if (editingCategory === categoryToDelete) {
             setEditingCategory(null);
             setEditingCategoryName('');
+          }
+
+          try {
+            await tutorialsCategoryStorage.saveAll(updatedCategories);
+          } catch {
+            setCategories(previousCategories);
+            setActiveFilter(previousActiveFilter);
+            Alert.alert('Error', 'Failed to delete category. Please try again.');
           }
         },
       },
@@ -318,14 +367,16 @@ export default function TutorialsScreen() {
       image: formData.images[0],
     };
 
-    if (editingItem) {
-      await tutorialsStorage.update(editingItem.id, normalizedFormData);
-    } else {
-      await tutorialsStorage.add(normalizedFormData);
-    }
-
-    await loadItems();
     setModalVisible(false);
+
+    await executeSave(async () => {
+      if (editingItem) {
+        await tutorialsStorage.update(editingItem.id, normalizedFormData);
+      } else {
+        await tutorialsStorage.add(normalizedFormData);
+      }
+    });
+
     resetForm();
   };
 
@@ -336,8 +387,16 @@ export default function TutorialsScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await tutorialsStorage.delete(item.id);
-          await loadItems();
+          setItems((prev) => prev.filter((current) => current.id !== item.id));
+          setIsDeleting(item.id);
+          try {
+            await tutorialsStorage.delete(item.id);
+          } catch {
+            await loadItems();
+            Alert.alert('Error', 'Failed to delete. Please try again.');
+          } finally {
+            setIsDeleting(null);
+          }
         },
       },
     ]);
@@ -653,6 +712,7 @@ export default function TutorialsScreen() {
               isFavorite={item.isFavorite ?? false}
               onEdit={() => openEditModal(item)}
               onDelete={() => handleDelete(item)}
+              isDeleteLoading={isDeleting === item.id}
             >
               <View style={styles.cardFooter}>
                 <View style={styles.metaTagsWrap}>
@@ -758,12 +818,15 @@ export default function TutorialsScreen() {
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               {editingItem ? 'Edit Tutorial' : 'Add Tutorial'}
             </Text>
-            <TouchableOpacity onPress={handleSave}>
-              <Text style={[styles.saveText, { color: colors.primary }]}>Save</Text>
+            <TouchableOpacity onPress={handleSave} disabled={isSaving} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {isSaving && <ActivityIndicator size="small" color={colors.primary} />}
+              <Text style={[styles.saveText, { color: isSaving ? colors.primary + '80' : colors.primary }]}>
+                {isSaving ? 'Saving...' : 'Save'}
+              </Text>
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.form} showsVerticalScrollIndicator={false} contentContainerStyle={styles.formContent}>
             <FormInput
               label="Tutorial Name *"
               placeholder="e.g., Midjourney Basics"
@@ -998,10 +1061,15 @@ export default function TutorialsScreen() {
                 style={[styles.categoryInput, { color: colors.text }]}
               />
               <TouchableOpacity
-                style={[styles.categoryActionButton, { backgroundColor: colors.primary }]}
+                style={[styles.categoryActionButton, { backgroundColor: colors.primary, opacity: isAddingCategory ? 0.6 : 1 }]}
                 onPress={addCategory}
+                disabled={isAddingCategory}
               >
-                <Ionicons name="add" size={16} color="#FFFFFF" />
+                {isAddingCategory ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Ionicons name="add" size={16} color="#FFFFFF" />
+                )}
               </TouchableOpacity>
             </View>
 
@@ -1307,6 +1375,9 @@ const styles = StyleSheet.create({
   form: {
     flex: 1,
     padding: 16,
+  },
+  formContent: {
+    flexGrow: 1,
   },
   detailsContent: {
     marginBottom: 14,

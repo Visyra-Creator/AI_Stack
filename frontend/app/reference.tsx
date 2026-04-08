@@ -13,6 +13,7 @@ import {
   TextInput,
   Linking,
   useWindowDimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -23,6 +24,7 @@ import { EmptyState } from '@/src/components/common/EmptyState';
 import { referenceStorage, ReferenceItem } from '@/src/services/storage';
 import * as DocumentPicker from 'expo-document-picker';
 import { openUriExternally } from '@/src/services/fileOpener';
+import { useOptimisticSave } from '@/src/hooks/useOptimisticSave';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -79,6 +81,20 @@ export default function ReferenceScreen() {
     files: [] as string[],
   });
 
+  // Optimistic save hook
+  const { isSaving, executeSave } = useOptimisticSave({
+    onSaveSuccess: () => {
+      loadItems();
+    },
+    onSaveError: (error) => {
+      Alert.alert('Error', 'Failed to save. Please try again.');
+      console.error('Save error:', error);
+    },
+  });
+
+  // Loading states for other operations
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+
   const loadItems = useCallback(async () => {
     const data = await referenceStorage.getAll();
     setItems(data);
@@ -126,14 +142,16 @@ export default function ReferenceScreen() {
       return;
     }
 
-    if (editingItem) {
-      await referenceStorage.update(editingItem.id, formData);
-    } else {
-      await referenceStorage.add(formData);
-    }
-
-    await loadItems();
     setModalVisible(false);
+
+    await executeSave(async () => {
+      if (editingItem) {
+        await referenceStorage.update(editingItem.id, formData);
+      } else {
+        await referenceStorage.add(formData);
+      }
+    });
+
     resetForm();
   };
 
@@ -144,8 +162,16 @@ export default function ReferenceScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await referenceStorage.delete(item.id);
-          await loadItems();
+          setItems(prev => prev.filter(current => current.id !== item.id));
+          setIsDeleting(item.id);
+          try {
+            await referenceStorage.delete(item.id);
+          } catch {
+            await loadItems();
+            Alert.alert('Error', 'Failed to delete. Please try again.');
+          } finally {
+            setIsDeleting(null);
+          }
         },
       },
     ]);
@@ -394,8 +420,13 @@ export default function ReferenceScreen() {
                       <TouchableOpacity
                         style={[styles.actionButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
                         onPress={() => handleDelete(item)}
+                        disabled={isDeleting === item.id}
                       >
-                        <Ionicons name="trash-outline" size={16} color={colors.textSecondary} />
+                        {isDeleting === item.id ? (
+                          <ActivityIndicator size="small" color={colors.danger} />
+                        ) : (
+                          <Ionicons name="trash-outline" size={16} color={colors.textSecondary} />
+                        )}
                       </TouchableOpacity>
                     </View>
 
@@ -533,12 +564,15 @@ export default function ReferenceScreen() {
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               {editingItem ? 'Edit Reference' : 'Add Reference'}
             </Text>
-            <TouchableOpacity onPress={handleSave}>
-              <Text style={[styles.saveText, { color: colors.primary }]}>Save</Text>
+            <TouchableOpacity onPress={handleSave} disabled={isSaving} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {isSaving && <ActivityIndicator size="small" color={colors.primary} />}
+              <Text style={[styles.saveText, { color: isSaving ? colors.primary + '80' : colors.primary }]}>
+                {isSaving ? 'Saving...' : 'Save'}
+              </Text>
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.form} showsVerticalScrollIndicator={false} contentContainerStyle={styles.formContent}>
             <FormInput
               label="Name *"
               placeholder="e.g., UI Checklist"
@@ -700,6 +734,7 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, fontWeight: '600' },
   saveText: { fontSize: 16, fontWeight: '600' },
   form: { flex: 1, padding: 16 },
+  formContent: { flexGrow: 1 },
   bottomPadding: { height: 40 },
   overlayCenter: {
     flex: 1,

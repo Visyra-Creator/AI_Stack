@@ -117,13 +117,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
+    alignItems: 'center',
     padding: 20,
   },
   modalContent: {
     borderRadius: 16,
     padding: 20,
-    maxHeight: '70%',
+    maxHeight: '80%',
     borderWidth: 1,
+    width: '100%',
   },
   modalTitle: {
     fontSize: 18,

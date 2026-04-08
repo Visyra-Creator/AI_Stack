@@ -16,6 +16,7 @@ import {
   FlatList,
   useWindowDimensions,
   GestureResponderEvent,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -32,6 +33,7 @@ import { openSourceStorage, openSourceCategoryStorage, OpenSourceItem } from '@/
 import { MultiSelect } from '@/src/components/common/MultiSelect';
 import { openUriExternally } from '@/src/services/fileOpener';
 import { resolveImageUri, getPrimaryImageUri as getResolvedPrimaryImageUri } from '@/src/services/imageResolver';
+import { useOptimisticSave } from '@/src/hooks/useOptimisticSave';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -68,6 +70,20 @@ export default function OpenSourceScreen() {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState('');
+
+  // Optimistic save hook
+  const { isSaving, executeSave } = useOptimisticSave({
+    onSaveSuccess: () => {
+      loadItems();
+    },
+    onSaveError: (error) => {
+      Alert.alert('Error', 'Failed to save. Please try again.');
+      console.error('Save error:', error);
+    },
+  });
+
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -127,15 +143,26 @@ export default function OpenSourceScreen() {
       return;
     }
 
+    const previousCategories = categories;
     const updatedCategories = [...categories, value].sort((a, b) => {
       if (a.toLowerCase() === 'other') return 1;
       if (b.toLowerCase() === 'other') return -1;
       return a.localeCompare(b, undefined, { sensitivity: 'base' });
     });
 
-    await openSourceCategoryStorage.saveAll(updatedCategories);
     setCategories(updatedCategories);
     setNewCategoryName('');
+    setIsAddingCategory(true);
+
+    try {
+      await openSourceCategoryStorage.saveAll(updatedCategories);
+    } catch {
+      setCategories(previousCategories);
+      setNewCategoryName(value);
+      Alert.alert('Error', 'Failed to add category. Please try again.');
+    } finally {
+      setIsAddingCategory(false);
+    }
   };
 
   const startEditCategory = (category: string) => {
@@ -161,11 +188,26 @@ export default function OpenSourceScreen() {
       return;
     }
 
+    const previousCategories = categories;
+    const previousEditingCategory = editingCategory;
+    const previousEditingCategoryName = editingCategoryName;
     const updatedCategories = categories.map((category) =>
       category === editingCategory ? value : category,
     );
-    await openSourceCategoryStorage.saveAll(updatedCategories);
     setCategories(updatedCategories);
+    setEditingCategory(null);
+    setEditingCategoryName('');
+
+    try {
+      await openSourceCategoryStorage.saveAll(updatedCategories);
+    } catch {
+      setCategories(previousCategories);
+      setEditingCategory(previousEditingCategory);
+      setEditingCategoryName(previousEditingCategoryName);
+      Alert.alert('Error', 'Failed to update category. Please try again.');
+      return;
+    }
+
     setFormData((prev) => {
       const nextCategories = prev.categories.map((category) =>
         category === editingCategory ? value : category,
@@ -179,8 +221,6 @@ export default function OpenSourceScreen() {
     if (activeFilter === editingCategory) {
       setActiveFilter(value);
     }
-    setEditingCategory(null);
-    setEditingCategoryName('');
   };
 
   const deleteCategory = (categoryToDelete: string) => {
@@ -190,10 +230,14 @@ export default function OpenSourceScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
+          const previousCategories = categories;
+          const previousActiveFilter = activeFilter;
           const updatedCategories = categories.filter((category) => category !== categoryToDelete);
           const fallback = getDefaultCategory(updatedCategories);
-          await openSourceCategoryStorage.saveAll(updatedCategories);
           setCategories(updatedCategories);
+          if (activeFilter === categoryToDelete) {
+            setActiveFilter('All');
+          }
           setFormData((prev) => {
             const nextCategories = prev.categories.filter((category) => category !== categoryToDelete);
             return {
@@ -202,12 +246,17 @@ export default function OpenSourceScreen() {
               categories: nextCategories.length > 0 ? nextCategories : [fallback],
             };
           });
-          if (activeFilter === categoryToDelete) {
-            setActiveFilter('All');
-          }
           if (editingCategory === categoryToDelete) {
             setEditingCategory(null);
             setEditingCategoryName('');
+          }
+
+          try {
+            await openSourceCategoryStorage.saveAll(updatedCategories);
+          } catch {
+            setCategories(previousCategories);
+            setActiveFilter(previousActiveFilter);
+            Alert.alert('Error', 'Failed to delete category. Please try again.');
           }
         },
       },
@@ -267,14 +316,16 @@ export default function OpenSourceScreen() {
 
     const cleanedLinks = formData.links.filter(l => l.label.trim() || l.url.trim());
 
-    if (editingItem) {
-      await openSourceStorage.update(editingItem.id, { ...formData, links: cleanedLinks });
-    } else {
-      await openSourceStorage.add({ ...formData, links: cleanedLinks });
-    }
-
-    await loadItems();
     setModalVisible(false);
+
+    await executeSave(async () => {
+      if (editingItem) {
+        await openSourceStorage.update(editingItem.id, { ...formData, links: cleanedLinks });
+      } else {
+        await openSourceStorage.add({ ...formData, links: cleanedLinks });
+      }
+    });
+
     resetForm();
   };
 
@@ -285,8 +336,16 @@ export default function OpenSourceScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await openSourceStorage.delete(item.id);
-          await loadItems();
+          setItems((prev) => prev.filter((current) => current.id !== item.id));
+          setIsDeleting(item.id);
+          try {
+            await openSourceStorage.delete(item.id);
+          } catch {
+            await loadItems();
+            Alert.alert('Error', 'Failed to delete. Please try again.');
+          } finally {
+            setIsDeleting(null);
+          }
         },
       },
     ]);
@@ -636,6 +695,7 @@ export default function OpenSourceScreen() {
               isFavorite={item.isFavorite ?? false}
               onEdit={() => openEditModal(item)}
               onDelete={() => handleDelete(item)}
+              isDeleteLoading={isDeleting === item.id}
             >
               <View style={styles.cardFooter}>
                 <View style={styles.metaTagsWrap}>
@@ -825,12 +885,15 @@ export default function OpenSourceScreen() {
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               {editingItem ? 'Edit Project' : 'Add Project'}
             </Text>
-            <TouchableOpacity onPress={handleSave}>
-              <Text style={[styles.saveText, { color: colors.primary }]}>Save</Text>
+            <TouchableOpacity onPress={handleSave} disabled={isSaving} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {isSaving && <ActivityIndicator size="small" color={colors.primary} />}
+              <Text style={[styles.saveText, { color: isSaving ? colors.primary + '80' : colors.primary }]}>
+                {isSaving ? 'Saving...' : 'Save'}
+              </Text>
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.form} showsVerticalScrollIndicator={false} contentContainerStyle={styles.formContent}>
             <FormInput
               label="Project Name *"
               placeholder="e.g., Stable Diffusion"
@@ -1041,10 +1104,15 @@ export default function OpenSourceScreen() {
                   style={[styles.categoryInput, { color: colors.text }]}
                 />
                 <TouchableOpacity
-                  style={[styles.categoryActionButton, { backgroundColor: colors.primary }]}
+                  style={[styles.categoryActionButton, { backgroundColor: colors.primary, opacity: isAddingCategory ? 0.6 : 1 }]}
                   onPress={addCategory}
+                  disabled={isAddingCategory}
                 >
-                  <Ionicons name="add" size={16} color="#FFFFFF" />
+                  {isAddingCategory ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Ionicons name="add" size={16} color="#FFFFFF" />
+                  )}
                 </TouchableOpacity>
               </View>
 
@@ -1289,6 +1357,9 @@ const styles = StyleSheet.create({
   form: {
     flex: 1,
     padding: 16,
+  },
+  formContent: {
+    flexGrow: 1,
   },
   detailsScroll: {
     flex: 1,

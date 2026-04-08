@@ -13,6 +13,7 @@ import {
   TextInput,
   Linking,
   useWindowDimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -23,6 +24,7 @@ import { Select } from '@/src/components/common/Select';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { websiteStorage, websiteCategoryStorage, WebsiteItem } from '@/src/services/storage';
 import { MultiSelect } from '@/src/components/common/MultiSelect';
+import { useOptimisticSave } from '@/src/hooks/useOptimisticSave';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -100,6 +102,18 @@ export default function WebsiteScreen() {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState('');
+
+  const { isSaving, executeSave } = useOptimisticSave({
+    onSaveSuccess: () => {
+      loadItems();
+    },
+    onSaveError: () => {
+      Alert.alert('Error', 'Failed to save. Please try again.');
+    },
+  });
+
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -183,14 +197,16 @@ export default function WebsiteScreen() {
         formData.pricingType === 'paid' ? formData.pricingDescription.trim() : '',
     };
 
-    if (editingItem) {
-      await websiteStorage.update(editingItem.id, payload);
-    } else {
-      await websiteStorage.add(payload);
-    }
-
-    await loadItems();
     setModalVisible(false);
+
+    await executeSave(async () => {
+      if (editingItem) {
+        await websiteStorage.update(editingItem.id, payload);
+      } else {
+        await websiteStorage.add(payload);
+      }
+    });
+
     resetForm();
   };
 
@@ -201,8 +217,19 @@ export default function WebsiteScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await websiteStorage.delete(item.id);
-          await loadItems();
+          // Optimistic: remove from list immediately
+          setItems(prev => prev.filter(current => current.id !== item.id));
+          setIsDeleting(item.id);
+
+          try {
+            await websiteStorage.delete(item.id);
+          } catch (error) {
+            // Revert on failure
+            await loadItems();
+            Alert.alert('Error', 'Failed to delete. Please try again.');
+          } finally {
+            setIsDeleting(null);
+          }
         },
       },
     ]);
@@ -259,10 +286,22 @@ export default function WebsiteScreen() {
       return;
     }
 
+    // Optimistic: add to list immediately
     const updatedCategories = [...categories, value];
-    await websiteCategoryStorage.saveAll(updatedCategories);
     setCategories(updatedCategories);
     setNewCategoryName('');
+    setIsAddingCategory(true);
+
+    try {
+      await websiteCategoryStorage.saveAll(updatedCategories);
+    } catch (error) {
+      // Revert on failure
+      setCategories(categories);
+      setNewCategoryName(value);
+      Alert.alert('Error', 'Failed to add category. Please try again.');
+    } finally {
+      setIsAddingCategory(false);
+    }
   };
 
   const startEditCategory = (category: string) => {
@@ -290,38 +329,48 @@ export default function WebsiteScreen() {
       return;
     }
 
+    // Optimistic: update immediately
     const updatedCategories = categories.map(category =>
       category === editingCategory ? value : category,
     );
-    await websiteCategoryStorage.saveAll(updatedCategories);
     setCategories(updatedCategories);
-
-    const allItems = await websiteStorage.getAll();
-    const affectedItems = allItems.filter(item => item.categories?.includes(editingCategory));
-    await Promise.all(
-      affectedItems.map(item =>
-        websiteStorage.update(item.id, {
-          categories: item.categories?.map(category =>
-            category === editingCategory ? value : category,
-          ),
-        }),
-      ),
-    );
-
-    if (activeFilter === editingCategory) {
-      setActiveFilter(value);
-    }
-
-    setFormData(prev => ({
-      ...prev,
-      categories: prev.categories.map(category =>
-        category === editingCategory ? value : category,
-      ),
-    }));
-
     setEditingCategory(null);
     setEditingCategoryName('');
-    await loadItems();
+
+    try {
+      await websiteCategoryStorage.saveAll(updatedCategories);
+
+      const allItems = await websiteStorage.getAll();
+      const affectedItems = allItems.filter(item => item.categories?.includes(editingCategory));
+      await Promise.all(
+        affectedItems.map(item =>
+          websiteStorage.update(item.id, {
+            categories: item.categories?.map(category =>
+              category === editingCategory ? value : category,
+            ),
+          }),
+        ),
+      );
+
+      if (activeFilter === editingCategory) {
+        setActiveFilter(value);
+      }
+
+      setFormData(prev => ({
+        ...prev,
+        categories: prev.categories.map(category =>
+          category === editingCategory ? value : category,
+        ),
+      }));
+
+      await loadItems();
+    } catch (error) {
+      // Revert on failure
+      setCategories(categories);
+      setEditingCategory(editingCategory);
+      setEditingCategoryName(editingCategoryName);
+      Alert.alert('Error', 'Failed to update category. Please try again.');
+    }
   };
 
   const deleteCategory = (categoryToDelete: string) => {
@@ -334,35 +383,46 @@ export default function WebsiteScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            // Optimistic: remove category immediately
             const updatedCategories = categories.filter(category => category !== categoryToDelete);
-            await websiteCategoryStorage.saveAll(updatedCategories);
             setCategories(updatedCategories);
-
-            const allItems = await websiteStorage.getAll();
-            const affectedItems = allItems.filter(item => item.categories?.includes(categoryToDelete));
-            await Promise.all(
-              affectedItems.map(item =>
-                websiteStorage.update(item.id, {
-                  categories: item.categories?.filter(category => category !== categoryToDelete),
-                }),
-              ),
-            );
 
             if (activeFilter === categoryToDelete) {
               setActiveFilter('All');
             }
 
-            setFormData(prev => ({
-              ...prev,
-              categories: prev.categories.filter(category => category !== categoryToDelete),
-            }));
+            try {
+              await websiteCategoryStorage.saveAll(updatedCategories);
 
-            if (editingCategory === categoryToDelete) {
-              setEditingCategory(null);
-              setEditingCategoryName('');
+              const allItems = await websiteStorage.getAll();
+              const affectedItems = allItems.filter(item => item.categories?.includes(categoryToDelete));
+              await Promise.all(
+                affectedItems.map(item =>
+                  websiteStorage.update(item.id, {
+                    categories: item.categories?.filter(category => category !== categoryToDelete),
+                  }),
+                ),
+              );
+
+              setFormData(prev => ({
+                ...prev,
+                categories: prev.categories.filter(category => category !== categoryToDelete),
+              }));
+
+              if (editingCategory === categoryToDelete) {
+                setEditingCategory(null);
+                setEditingCategoryName('');
+              }
+
+              await loadItems();
+            } catch (error) {
+              // Revert on failure
+              setCategories(categories);
+              if (activeFilter === 'All') {
+                setActiveFilter(categoryToDelete);
+              }
+              Alert.alert('Error', 'Failed to delete category. Please try again.');
             }
-
-            await loadItems();
           },
         },
       ],
@@ -587,8 +647,13 @@ export default function WebsiteScreen() {
                       <TouchableOpacity
                         style={[styles.actionButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
                         onPress={() => handleDelete(item)}
+                        disabled={isDeleting === item.id}
                       >
-                        <Ionicons name="trash-outline" size={16} color={colors.textSecondary} />
+                        {isDeleting === item.id ? (
+                          <ActivityIndicator size="small" color={colors.danger} />
+                        ) : (
+                          <Ionicons name="trash-outline" size={16} color={colors.textSecondary} />
+                        )}
                       </TouchableOpacity>
                     </View>
 
@@ -794,12 +859,15 @@ export default function WebsiteScreen() {
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               {editingItem ? 'Edit Website' : 'Add Website'}
             </Text>
-            <TouchableOpacity onPress={handleSave}>
-              <Text style={[styles.saveText, { color: colors.primary }]}>Save</Text>
+            <TouchableOpacity onPress={handleSave} disabled={isSaving} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {isSaving && <ActivityIndicator size="small" color={colors.primary} />}
+              <Text style={[styles.saveText, { color: isSaving ? colors.primary + '80' : colors.primary }]}>
+                {isSaving ? 'Saving...' : 'Save'}
+              </Text>
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.form} showsVerticalScrollIndicator={false} contentContainerStyle={styles.formContent}>
             <FormInput
               label="Website Name *"
               placeholder="e.g., Notion, Figma"
@@ -883,10 +951,15 @@ export default function WebsiteScreen() {
                 style={[styles.categoryInput, { color: colors.text }]}
               />
               <TouchableOpacity
-                style={[styles.categoryActionButton, { backgroundColor: colors.primary }]}
+                style={[styles.categoryActionButton, { backgroundColor: colors.primary, opacity: isAddingCategory ? 0.6 : 1 }]}
                 onPress={addCategory}
+                disabled={isAddingCategory}
               >
-                <Ionicons name="add" size={16} color="#FFFFFF" />
+                {isAddingCategory ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Ionicons name="add" size={16} color="#FFFFFF" />
+                )}
               </TouchableOpacity>
             </View>
 
@@ -1251,6 +1324,9 @@ const styles = StyleSheet.create({
   form: {
     flex: 1,
     padding: 16,
+  },
+  formContent: {
+    flexGrow: 1,
   },
   bottomPadding: {
     height: 40,

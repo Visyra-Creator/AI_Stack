@@ -16,6 +16,7 @@ import {
   Image,
   GestureResponderEvent,
   Linking,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -31,6 +32,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { businessStorage, businessCategoryStorage, BusinessItem } from '@/src/services/storage';
 import { openUriExternally } from '@/src/services/fileOpener';
+import { useOptimisticSave } from '@/src/hooks/useOptimisticSave';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -72,6 +74,21 @@ export default function BusinessScreen() {
   const toggleFavoritesOnly = () => {
     setIsFavoritesOnly(prev => !prev);
   };
+
+  // Optimistic save hook
+  const { isSaving, executeSave } = useOptimisticSave({
+    onSaveSuccess: () => {
+      loadItems();
+    },
+    onSaveError: (error) => {
+      Alert.alert('Error', 'Failed to save. Please try again.');
+      console.error('Save error:', error);
+    },
+  });
+
+  // Loading states for other operations
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
 
   const [formData, setFormData] = useState({
     sectionName: 'General',
@@ -213,14 +230,16 @@ export default function BusinessScreen() {
       return;
     }
 
-    if (editingItem) {
-      await businessStorage.update(editingItem.id, formData);
-    } else {
-      await businessStorage.add(formData);
-    }
-
-    await loadItems();
     setModalVisible(false);
+
+    await executeSave(async () => {
+      if (editingItem) {
+        await businessStorage.update(editingItem.id, formData);
+      } else {
+        await businessStorage.add(formData);
+      }
+    });
+
     resetForm();
   };
 
@@ -312,8 +331,17 @@ export default function BusinessScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await businessStorage.delete(item.id);
-          await loadItems();
+          setItems(prev => prev.filter(current => current.id !== item.id));
+          setIsDeleting(item.id);
+          try {
+            await businessStorage.delete(item.id);
+          } catch (error) {
+            await loadItems();
+            Alert.alert('Error', 'Failed to delete. Please try again.');
+            console.error('Delete error:', error);
+          } finally {
+            setIsDeleting(null);
+          }
         },
       },
     ]);
@@ -352,10 +380,21 @@ export default function BusinessScreen() {
       return;
     }
 
+    const previousCategories = categories;
     const updatedCategories = [...categories, value];
-    await businessCategoryStorage.saveAll(updatedCategories);
     setCategories(updatedCategories);
     setNewCategoryName('');
+    setIsAddingCategory(true);
+    try {
+      await businessCategoryStorage.saveAll(updatedCategories);
+    } catch (error) {
+      setCategories(previousCategories);
+      setNewCategoryName(value);
+      Alert.alert('Error', 'Failed to add category. Please try again.');
+      console.error('Add category error:', error);
+    } finally {
+      setIsAddingCategory(false);
+    }
   };
 
   const startEditCategory = (category: string) => {
@@ -383,11 +422,25 @@ export default function BusinessScreen() {
       return;
     }
 
+    const previousCategories = categories;
+    const previousEditingCategory = editingCategory;
+    const previousEditingCategoryName = editingCategoryName;
     const updatedCategories = categories.map(category =>
       category === editingCategory ? value : category,
     );
-    await businessCategoryStorage.saveAll(updatedCategories);
     setCategories(updatedCategories);
+    setEditingCategory(null);
+    setEditingCategoryName('');
+
+    try {
+      await businessCategoryStorage.saveAll(updatedCategories);
+    } catch {
+      setCategories(previousCategories);
+      setEditingCategory(previousEditingCategory);
+      setEditingCategoryName(previousEditingCategoryName);
+      Alert.alert('Error', 'Failed to update category. Please try again.');
+      return;
+    }
 
     const allItems = await businessStorage.getAll();
     const affectedItems = allItems.filter(item => item.categories?.includes(editingCategory));
@@ -412,8 +465,6 @@ export default function BusinessScreen() {
       ),
     }));
 
-    setEditingCategory(null);
-    setEditingCategoryName('');
     await loadItems();
   };
 
@@ -427,35 +478,44 @@ export default function BusinessScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            const previousCategories = categories;
+            const previousActiveFilter = activeFilter;
             const updatedCategories = categories.filter(category => category !== categoryToDelete);
-            await businessCategoryStorage.saveAll(updatedCategories);
             setCategories(updatedCategories);
-
-            const allItems = await businessStorage.getAll();
-            const affectedItems = allItems.filter(item => item.categories?.includes(categoryToDelete));
-            await Promise.all(
-              affectedItems.map(item =>
-                businessStorage.update(item.id, {
-                  categories: item.categories?.filter(category => category !== categoryToDelete),
-                }),
-              ),
-            );
 
             if (activeFilter === categoryToDelete) {
               setActiveFilter('All');
             }
 
-            setFormData(prev => ({
-              ...prev,
-              categories: prev.categories.filter(category => category !== categoryToDelete),
-            }));
+            try {
+              await businessCategoryStorage.saveAll(updatedCategories);
 
-            if (editingCategory === categoryToDelete) {
-              setEditingCategory(null);
-              setEditingCategoryName('');
+              const allItems = await businessStorage.getAll();
+              const affectedItems = allItems.filter(item => item.categories?.includes(categoryToDelete));
+              await Promise.all(
+                affectedItems.map(item =>
+                  businessStorage.update(item.id, {
+                    categories: item.categories?.filter(category => category !== categoryToDelete),
+                  }),
+                ),
+              );
+
+              setFormData(prev => ({
+                ...prev,
+                categories: prev.categories.filter(category => category !== categoryToDelete),
+              }));
+
+              if (editingCategory === categoryToDelete) {
+                setEditingCategory(null);
+                setEditingCategoryName('');
+              }
+
+              await loadItems();
+            } catch {
+              setCategories(previousCategories);
+              setActiveFilter(previousActiveFilter);
+              Alert.alert('Error', 'Failed to delete category. Please try again.');
             }
-
-            await loadItems();
           },
         },
       ],
@@ -626,6 +686,7 @@ export default function BusinessScreen() {
               isFavorite={item.isFavorite ?? false}
               onEdit={() => openEditModal(item)}
               onDelete={() => handleDelete(item)}
+              isDeleteLoading={isDeleting === item.id}
             >
               {item.link && (
                 <Text style={[styles.link, { color: colors.primary }]} numberOfLines={1}>
@@ -867,12 +928,15 @@ export default function BusinessScreen() {
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               {editingItem ? 'Edit Item' : 'Add Item'}
             </Text>
-            <TouchableOpacity onPress={handleSave}>
-              <Text style={[styles.saveText, { color: colors.primary }]}>Save</Text>
+            <TouchableOpacity onPress={handleSave} disabled={isSaving} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {isSaving && <ActivityIndicator size="small" color={colors.primary} />}
+              <Text style={[styles.saveText, { color: isSaving ? colors.primary + '80' : colors.primary }]}>
+                {isSaving ? 'Saving...' : 'Save'}
+              </Text>
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.form} showsVerticalScrollIndicator={false} contentContainerStyle={styles.formContent}>
             <Select
               label="Section"
               options={sections}
@@ -1021,10 +1085,15 @@ export default function BusinessScreen() {
                 style={[styles.categoryInput, { color: colors.text }]}
               />
               <TouchableOpacity
-                style={[styles.categoryActionButton, { backgroundColor: colors.primary }]}
+                style={[styles.categoryActionButton, { backgroundColor: colors.primary, opacity: isAddingCategory ? 0.6 : 1 }]}
                 onPress={addCategory}
+                disabled={isAddingCategory}
               >
-                <Ionicons name="add" size={16} color="#FFFFFF" />
+                {isAddingCategory ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Ionicons name="add" size={16} color="#FFFFFF" />
+                )}
               </TouchableOpacity>
             </View>
 
@@ -1277,6 +1346,9 @@ const styles = StyleSheet.create({
   form: {
     flex: 1,
     padding: 16,
+  },
+  formContent: {
+    flexGrow: 1,
   },
   textArea: {
     minHeight: 100,

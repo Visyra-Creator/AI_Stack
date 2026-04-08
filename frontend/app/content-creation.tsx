@@ -29,6 +29,7 @@ import { contentCreationStorage, contentCreationCategoryStorage, ContentCreation
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { openUriExternally } from '@/src/services/fileOpener';
+import { useOptimisticSave } from '@/src/hooks/useOptimisticSave';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -69,6 +70,21 @@ export default function ContentCreationScreen() {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState('');
+
+  // Optimistic save hook
+  const { isSaving, executeSave } = useOptimisticSave({
+    onSaveSuccess: () => {
+      loadItems();
+    },
+    onSaveError: (error) => {
+      Alert.alert('Error', 'Failed to save. Please try again.');
+      console.error('Save error:', error);
+    },
+  });
+
+  // Loading states for other operations
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
 
   const [formData, setFormData] = useState({
     toolName: '',
@@ -121,10 +137,21 @@ export default function ContentCreationScreen() {
       return;
     }
 
+    const previousCategories = categories;
     const updatedCategories = [...categories, value];
-    await contentCreationCategoryStorage.saveAll(updatedCategories);
     setCategories(updatedCategories);
     setNewCategoryName('');
+    setIsAddingCategory(true);
+
+    try {
+      await contentCreationCategoryStorage.saveAll(updatedCategories);
+    } catch {
+      setCategories(previousCategories);
+      setNewCategoryName(value);
+      Alert.alert('Error', 'Failed to add category. Please try again.');
+    } finally {
+      setIsAddingCategory(false);
+    }
   };
 
   const startEditCategory = (category: string) => {
@@ -152,11 +179,25 @@ export default function ContentCreationScreen() {
       return;
     }
 
+    const previousCategories = categories;
+    const previousEditingCategory = editingCategory;
+    const previousEditingCategoryName = editingCategoryName;
     const updatedCategories = categories.map(category =>
       category === editingCategory ? value : category
     );
-    await contentCreationCategoryStorage.saveAll(updatedCategories);
     setCategories(updatedCategories);
+    setEditingCategory(null);
+    setEditingCategoryName('');
+
+    try {
+      await contentCreationCategoryStorage.saveAll(updatedCategories);
+    } catch {
+      setCategories(previousCategories);
+      setEditingCategory(previousEditingCategory);
+      setEditingCategoryName(previousEditingCategoryName);
+      Alert.alert('Error', 'Failed to update category. Please try again.');
+      return;
+    }
 
     const allItems = await contentCreationStorage.getAll();
     const affectedItems = allItems.filter(item => item.categories?.includes(editingCategory));
@@ -181,8 +222,6 @@ export default function ContentCreationScreen() {
       ),
     }));
 
-    setEditingCategory(null);
-    setEditingCategoryName('');
     await loadItems();
   };
 
@@ -196,35 +235,44 @@ export default function ContentCreationScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            const previousCategories = categories;
+            const previousActiveFilter = activeFilter;
             const updatedCategories = categories.filter(category => category !== categoryToDelete);
-            await contentCreationCategoryStorage.saveAll(updatedCategories);
             setCategories(updatedCategories);
-
-            const allItems = await contentCreationStorage.getAll();
-            const affectedItems = allItems.filter(item => item.categories?.includes(categoryToDelete));
-            await Promise.all(
-              affectedItems.map(item =>
-                contentCreationStorage.update(item.id, {
-                  categories: (item.categories || []).filter(category => category !== categoryToDelete),
-                })
-              )
-            );
 
             if (activeFilter === categoryToDelete) {
               setActiveFilter('All');
             }
 
-            setFormData(prev => ({
-              ...prev,
-              categories: prev.categories.filter(category => category !== categoryToDelete),
-            }));
+            try {
+              await contentCreationCategoryStorage.saveAll(updatedCategories);
 
-            if (editingCategory === categoryToDelete) {
-              setEditingCategory(null);
-              setEditingCategoryName('');
+              const allItems = await contentCreationStorage.getAll();
+              const affectedItems = allItems.filter(item => item.categories?.includes(categoryToDelete));
+              await Promise.all(
+                affectedItems.map(item =>
+                  contentCreationStorage.update(item.id, {
+                    categories: (item.categories || []).filter(category => category !== categoryToDelete),
+                  })
+                )
+              );
+
+              setFormData(prev => ({
+                ...prev,
+                categories: prev.categories.filter(category => category !== categoryToDelete),
+              }));
+
+              if (editingCategory === categoryToDelete) {
+                setEditingCategory(null);
+                setEditingCategoryName('');
+              }
+
+              await loadItems();
+            } catch {
+              setCategories(previousCategories);
+              setActiveFilter(previousActiveFilter);
+              Alert.alert('Error', 'Failed to delete category. Please try again.');
             }
-
-            await loadItems();
           },
         },
       ]
@@ -377,14 +425,16 @@ export default function ContentCreationScreen() {
       return;
     }
 
-    if (editingItem) {
-      await contentCreationStorage.update(editingItem.id, formData);
-    } else {
-      await contentCreationStorage.add(formData);
-    }
-
-    await loadItems();
     setModalVisible(false);
+
+    await executeSave(async () => {
+      if (editingItem) {
+        await contentCreationStorage.update(editingItem.id, formData);
+      } else {
+        await contentCreationStorage.add(formData);
+      }
+    });
+
     resetForm();
   };
 
@@ -395,8 +445,16 @@ export default function ContentCreationScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await contentCreationStorage.delete(item.id);
-          await loadItems();
+          setItems(prev => prev.filter(current => current.id !== item.id));
+          setIsDeleting(item.id);
+          try {
+            await contentCreationStorage.delete(item.id);
+          } catch {
+            await loadItems();
+            Alert.alert('Error', 'Failed to delete. Please try again.');
+          } finally {
+            setIsDeleting(null);
+          }
         },
       },
     ]);
@@ -531,6 +589,7 @@ export default function ContentCreationScreen() {
               isFavorite={item.isFavorite ?? false}
               onEdit={() => openEditModal(item)}
               onDelete={() => handleDelete(item)}
+              isDeleteLoading={isDeleting === item.id}
             >
               <View style={styles.cardFooter}>
                 <View style={styles.metaTagsWrap}>
@@ -654,12 +713,15 @@ export default function ContentCreationScreen() {
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               {editingItem ? 'Edit Tool' : 'Add Tool'}
             </Text>
-            <TouchableOpacity onPress={handleSave}>
-              <Text style={[styles.saveText, { color: colors.primary }]}>Save</Text>
+            <TouchableOpacity onPress={handleSave} disabled={isSaving} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {isSaving && <ActivityIndicator size="small" color={colors.primary} />}
+              <Text style={[styles.saveText, { color: isSaving ? colors.primary + '80' : colors.primary }]}>
+                {isSaving ? 'Saving...' : 'Save'}
+              </Text>
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.form} showsVerticalScrollIndicator={false} contentContainerStyle={styles.formContent}>
             <FormInput
               label="Tool Name *"
               placeholder="e.g., Canva, CapCut"
@@ -976,10 +1038,15 @@ export default function ContentCreationScreen() {
                 style={[styles.categoryInput, { color: colors.text }]}
               />
               <TouchableOpacity
-                style={[styles.categoryActionButton, { backgroundColor: colors.primary }]}
+                style={[styles.categoryActionButton, { backgroundColor: colors.primary, opacity: isAddingCategory ? 0.6 : 1 }]}
                 onPress={addCategory}
+                disabled={isAddingCategory}
               >
-                <Ionicons name="add" size={16} color="#FFFFFF" />
+                {isAddingCategory ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Ionicons name="add" size={16} color="#FFFFFF" />
+                )}
               </TouchableOpacity>
             </View>
 
@@ -1240,6 +1307,9 @@ const styles = StyleSheet.create({
   form: {
     flex: 1,
     padding: 16,
+  },
+  formContent: {
+    flexGrow: 1,
   },
   textArea: {
     minHeight: 100,

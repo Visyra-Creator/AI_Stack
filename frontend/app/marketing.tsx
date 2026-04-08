@@ -15,6 +15,7 @@ import {
   FlatList,
   useWindowDimensions,
   GestureResponderEvent,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -28,6 +29,7 @@ import { Select } from '@/src/components/common/Select';
 import { Button } from '@/src/components/common/Button';
 import { EmptyState } from '@/src/components/common/EmptyState';
 import { marketingStorage, marketingCategoryStorage, MarketingItem } from '@/src/services/storage';
+import { useOptimisticSave } from '@/src/hooks/useOptimisticSave';
 
 const SORT_OPTIONS = [
   { label: 'Recent', value: 'recent' },
@@ -63,6 +65,21 @@ export default function MarketingScreen() {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState('');
+
+  // Optimistic save hook
+  const { isSaving, executeSave } = useOptimisticSave({
+    onSaveSuccess: () => {
+      loadItems();
+    },
+    onSaveError: (error) => {
+      Alert.alert('Error', 'Failed to save. Please try again.');
+      console.error('Save error:', error);
+    },
+  });
+
+  // Loading states for other operations
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -138,18 +155,31 @@ export default function MarketingScreen() {
       return;
     }
 
+    const previousCategories = categories;
+    const previousEditingCategory = editingCategory;
+    const previousEditingCategoryName = editingCategoryName;
     const updatedCategories = categories.map((category) =>
       category === editingCategory ? value : category,
     );
-    await marketingCategoryStorage.saveAll(updatedCategories);
     setCategories(updatedCategories);
+    setEditingCategory(null);
+    setEditingCategoryName('');
+
+    try {
+      await marketingCategoryStorage.saveAll(updatedCategories);
+    } catch {
+      setCategories(previousCategories);
+      setEditingCategory(previousEditingCategory);
+      setEditingCategoryName(previousEditingCategoryName);
+      Alert.alert('Error', 'Failed to update category. Please try again.');
+      return;
+    }
+
     setFormData((prev) => ({
       ...prev,
       category: prev.category === editingCategory ? value : prev.category,
       categories: prev.categories.map((category) => (category === editingCategory ? value : category)),
     }));
-    setEditingCategory(null);
-    setEditingCategoryName('');
   };
 
   const deleteCategory = (categoryToDelete: string) => {
@@ -159,18 +189,25 @@ export default function MarketingScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
+          const previousCategories = categories;
           const updatedCategories = categories.filter((category) => category !== categoryToDelete);
           const fallback = getDefaultCategory(updatedCategories);
-          await marketingCategoryStorage.saveAll(updatedCategories);
           setCategories(updatedCategories);
-          setFormData((prev) => ({
-            ...prev,
-            category: prev.category === categoryToDelete ? fallback : prev.category,
-            categories: prev.categories.filter((category) => category !== categoryToDelete),
-          }));
-          if (editingCategory === categoryToDelete) {
-            setEditingCategory(null);
-            setEditingCategoryName('');
+
+          try {
+            await marketingCategoryStorage.saveAll(updatedCategories);
+            setFormData((prev) => ({
+              ...prev,
+              category: prev.category === categoryToDelete ? fallback : prev.category,
+              categories: prev.categories.filter((category) => category !== categoryToDelete),
+            }));
+            if (editingCategory === categoryToDelete) {
+              setEditingCategory(null);
+              setEditingCategoryName('');
+            }
+          } catch {
+            setCategories(previousCategories);
+            Alert.alert('Error', 'Failed to delete category. Please try again.');
           }
         },
       },
@@ -235,14 +272,16 @@ export default function MarketingScreen() {
       file: formData.files[0],
     };
 
-    if (editingItem) {
-      await marketingStorage.update(editingItem.id, payload);
-    } else {
-      await marketingStorage.add(payload);
-    }
-
-    await loadItems();
     setModalVisible(false);
+
+    await executeSave(async () => {
+      if (editingItem) {
+        await marketingStorage.update(editingItem.id, payload);
+      } else {
+        await marketingStorage.add(payload);
+      }
+    });
+
     resetForm();
   };
 
@@ -253,8 +292,16 @@ export default function MarketingScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await marketingStorage.delete(item.id);
-          await loadItems();
+          setItems(prev => prev.filter(current => current.id !== item.id));
+          setIsDeleting(item.id);
+          try {
+            await marketingStorage.delete(item.id);
+          } catch {
+            await loadItems();
+            Alert.alert('Error', 'Failed to delete. Please try again.');
+          } finally {
+            setIsDeleting(null);
+          }
         },
       },
     ]);
@@ -617,6 +664,7 @@ export default function MarketingScreen() {
               isFavorite={item.isFavorite ?? false}
               onEdit={() => openEditModal(item)}
               onDelete={() => handleDelete(item)}
+              isDeleteLoading={isDeleting === item.id}
             >
               <View style={styles.cardFooter}>
                 <View style={styles.metaTagsWrap}>
@@ -757,12 +805,15 @@ export default function MarketingScreen() {
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               {editingItem ? 'Edit Tool' : 'Add Tool'}
             </Text>
-            <TouchableOpacity onPress={handleSave}>
-              <Text style={[styles.saveText, { color: colors.primary }]}>Save</Text>
+            <TouchableOpacity onPress={handleSave} disabled={isSaving} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {isSaving && <ActivityIndicator size="small" color={colors.primary} />}
+              <Text style={[styles.saveText, { color: isSaving ? colors.primary + '80' : colors.primary }]}>
+                {isSaving ? 'Saving...' : 'Save'}
+              </Text>
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.form} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.form} showsVerticalScrollIndicator={false} contentContainerStyle={styles.formContent}>
             <FormInput
               label="Name *"
               placeholder="e.g., Mailchimp, HubSpot"
@@ -898,7 +949,7 @@ export default function MarketingScreen() {
                 style={[styles.categoryInput, { color: colors.text }]}
               />
               <TouchableOpacity
-                style={[styles.categoryActionButton, { backgroundColor: colors.primary }]}
+                style={[styles.categoryActionButton, { backgroundColor: colors.primary, opacity: isAddingCategory ? 0.6 : 1 }]}
                 onPress={async () => {
                   const value = normalizeCategory(newCategoryName);
                   if (!value) {
@@ -910,17 +961,33 @@ export default function MarketingScreen() {
                     return;
                   }
 
+                  const previousCategories = categories;
                   const updatedCategories = [...categories, value].sort((a, b) => {
                     if (a.toLowerCase() === 'other') return 1;
                     if (b.toLowerCase() === 'other') return -1;
                     return a.localeCompare(b, undefined, { sensitivity: 'base' });
                   });
-                  await marketingCategoryStorage.saveAll(updatedCategories);
+
                   setCategories(updatedCategories);
                   setNewCategoryName('');
+                  setIsAddingCategory(true);
+                  try {
+                    await marketingCategoryStorage.saveAll(updatedCategories);
+                  } catch {
+                    setCategories(previousCategories);
+                    setNewCategoryName(value);
+                    Alert.alert('Error', 'Failed to add category. Please try again.');
+                  } finally {
+                    setIsAddingCategory(false);
+                  }
                 }}
+                disabled={isAddingCategory}
               >
-                <Ionicons name="add" size={16} color="#FFFFFF" />
+                {isAddingCategory ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Ionicons name="add" size={16} color="#FFFFFF" />
+                )}
               </TouchableOpacity>
             </View>
 
@@ -1187,6 +1254,9 @@ const styles = StyleSheet.create({
   form: {
     flex: 1,
     padding: 16,
+  },
+  formContent: {
+    flexGrow: 1,
   },
   textArea: {
     minHeight: 100,
