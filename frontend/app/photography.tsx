@@ -800,12 +800,14 @@ export default function PhotographyScreen() {
     );
   };
 
-  const handleImagePress = (index: number, id: string) => {
+  const handleImagePress = (_index: number, id: string) => {
     if (isImageSelectionMode) {
       toggleImageSelection(id);
       return;
     }
-    handleOpenPreview(index, 'images', displayedImages);
+    const tappedIndex = displayedImages.findIndex((item) => item.id === id);
+    if (tappedIndex < 0) return;
+    handleOpenPreview(tappedIndex, 'images', displayedImages);
   };
 
   const handleImageLoadError = (item: SavedImage) => {
@@ -2067,7 +2069,13 @@ export default function PhotographyScreen() {
         </View>
       </Modal>
 
-      <Modal visible={previewVisible} transparent animationType="fade" onRequestClose={handleClosePreview}>
+      <Modal
+        visible={previewVisible}
+        transparent={false}
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={handleClosePreview}
+      >
         <View style={styles.previewOverlay}>
           <View style={styles.previewContent}>
             <TouchableOpacity
@@ -2675,7 +2683,7 @@ const styles = StyleSheet.create({
   },
   previewOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.85)',
+    backgroundColor: '#000000',
     justifyContent: 'center',
     alignItems: 'center',
   },
