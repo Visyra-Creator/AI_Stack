@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ExpoImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { VideoView, useVideoPlayer } from 'expo-video';
+import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@/src/context/ThemeContext';
 import { Select } from '@/src/components/common/Select';
@@ -60,6 +61,7 @@ const PHOTOGRAPHY_VIDEOS_KEY = 'photography_saved_videos';
 const PHOTOGRAPHY_IMAGES_BACKUP_KEY = 'photography_saved_images_backup_v1';
 const PHOTOGRAPHY_VIDEOS_BACKUP_KEY = 'photography_saved_videos_backup_v1';
 const PHOTOGRAPHY_MEDIA_MIGRATION_KEY = 'photography_media_migration_v1_done';
+const PHOTOGRAPHY_IMAGE_URI_MIGRATION_KEY = 'photography_image_uri_migration_v2_done';
 const PHOTOGRAPHY_IMAGE_SUBSECTIONS_KEY = 'photography_image_subsections';
 const PHOTOGRAPHY_VIDEO_SUBSECTIONS_KEY = 'photography_video_subsections';
 
@@ -86,6 +88,58 @@ const parseLegacyUri = (value: unknown): string | undefined => {
       return undefined;
     }
   }
+  return trimmed;
+};
+
+const PHOTOGRAPHY_MEDIA_DIR_NAME = 'aikeeper-photography';
+
+const getPhotographyMediaDir = () => {
+  if (!FileSystem.documentDirectory) return undefined;
+  return `${FileSystem.documentDirectory}${PHOTOGRAPHY_MEDIA_DIR_NAME}`;
+};
+
+const extensionFromUri = (uri: string, fallback: string) => {
+  const match = uri.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
+  return (match?.[1] || fallback).toLowerCase();
+};
+
+const persistImageUri = async (uri: string): Promise<string> => {
+  const trimmed = uri.trim();
+  if (!trimmed) return trimmed;
+
+  const mediaDir = getPhotographyMediaDir();
+  if (!mediaDir) return trimmed;
+  if (trimmed.startsWith(mediaDir)) return trimmed;
+
+  try {
+    await FileSystem.makeDirectoryAsync(mediaDir, { intermediates: true });
+  } catch {
+    // Directory may already exist; continue.
+  }
+
+  try {
+    if (trimmed.startsWith('data:image/')) {
+      const dataMatch = trimmed.match(/^data:image\/(\w+);base64,(.*)$/);
+      if (!dataMatch) return trimmed;
+      const ext = (dataMatch[1] || 'jpg').toLowerCase();
+      const base64Data = dataMatch[2] || '';
+      const destination = `${mediaDir}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+      await FileSystem.writeAsStringAsync(destination, base64Data, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      return destination;
+    }
+
+    if (trimmed.startsWith('content://') || trimmed.startsWith('file://')) {
+      const ext = extensionFromUri(trimmed, 'jpg');
+      const destination = `${mediaDir}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+      await FileSystem.copyAsync({ from: trimmed, to: destination });
+      return destination;
+    }
+  } catch {
+    return trimmed;
+  }
+
   return trimmed;
 };
 
@@ -284,9 +338,10 @@ export default function PhotographyScreen() {
   useEffect(() => {
     const loadSavedImages = async () => {
       try {
-        const [raw, migrationDone] = await Promise.all([
+        const [raw, migrationDone, imageUriMigrationDone] = await Promise.all([
           AsyncStorage.getItem(PHOTOGRAPHY_IMAGES_KEY),
           AsyncStorage.getItem(PHOTOGRAPHY_MEDIA_MIGRATION_KEY),
+          AsyncStorage.getItem(PHOTOGRAPHY_IMAGE_URI_MIGRATION_KEY),
         ]);
         if (!raw) {
           setHasHydratedImages(true);
@@ -300,8 +355,8 @@ export default function PhotographyScreen() {
         }
 
         let repaired = false;
-        const normalized = parsed
-          .map((item) => {
+        const normalizedWithMaybeLegacyUris = parsed
+          .map((item, index) => {
             if (!item || typeof item !== 'object') return null;
             const uri = parseLegacyUri((item as any).uri);
             if (!uri) return null;
@@ -333,12 +388,31 @@ export default function PhotographyScreen() {
           })
           .filter((item): item is SavedImage => !!item);
 
+        let normalized = normalizedWithMaybeLegacyUris;
+        if (!imageUriMigrationDone) {
+          const migrated = await Promise.all(
+            normalizedWithMaybeLegacyUris.map(async (item) => {
+              const nextUri = await persistImageUri(item.uri);
+              if (nextUri !== item.uri) repaired = true;
+              return nextUri === item.uri ? item : { ...item, uri: nextUri };
+            }),
+          );
+          normalized = migrated;
+        }
+
         const hadDrops = normalized.length !== parsed.length;
         if (hadDrops) repaired = true;
 
         if (!migrationDone && repaired) {
           await AsyncStorage.setItem(PHOTOGRAPHY_IMAGES_BACKUP_KEY, raw);
           await AsyncStorage.setItem(PHOTOGRAPHY_IMAGES_KEY, JSON.stringify(normalized));
+        }
+
+        if (!imageUriMigrationDone) {
+          await AsyncStorage.setItem(PHOTOGRAPHY_IMAGE_URI_MIGRATION_KEY, '1');
+          if (!migrationDone || repaired) {
+            await AsyncStorage.setItem(PHOTOGRAPHY_IMAGES_KEY, JSON.stringify(normalized));
+          }
         }
 
         setSavedImages(normalized);

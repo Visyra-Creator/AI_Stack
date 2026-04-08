@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, Image, StyleSheet, Dimensions } from 'react-native';
 import * as ExpoImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/src/context/ThemeContext';
 
@@ -37,6 +38,27 @@ export const ImagePicker: React.FC<ImagePickerProps> = ({
 
   const currentValues = multiple ? (values || []) : value ? [value] : [];
 
+  const persistPickedImage = async (assetUri: string): Promise<string> => {
+    try {
+      const documentDir = FileSystem.documentDirectory;
+      if (!documentDir) return assetUri;
+
+      // Keep already-persisted files untouched.
+      if (assetUri.startsWith(documentDir)) return assetUri;
+
+      const match = assetUri.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
+      const ext = (match?.[1] || 'jpg').toLowerCase();
+      const folder = `${documentDir}aikeeper-images`;
+      const destination = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+
+      await FileSystem.makeDirectoryAsync(folder, { intermediates: true });
+      await FileSystem.copyAsync({ from: assetUri, to: destination });
+      return destination;
+    } catch {
+      return assetUri;
+    }
+  };
+
   const pickImage = async () => {
     const permission = await ExpoImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
@@ -50,13 +72,15 @@ export const ImagePicker: React.FC<ImagePickerProps> = ({
       allowsMultipleSelection: multiple,
       selectionLimit: multiple ? maxSelection : 1,
       quality: 0.7,
-      base64: true,
     });
 
     if (!result.canceled && result.assets.length > 0) {
-      const picked = result.assets
-        .map((asset) => (asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : null))
-        .filter((item): item is string => !!item);
+      const picked = (await Promise.all(
+        result.assets
+          .map((asset) => asset.uri)
+          .filter((uri): uri is string => !!uri)
+          .map((uri) => persistPickedImage(uri)),
+      )).filter((item): item is string => !!item);
 
       if (picked.length === 0) return;
 

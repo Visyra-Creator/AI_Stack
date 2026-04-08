@@ -22,6 +22,14 @@ import AdvancedRichTextEditor from '@/src/components/AdvancedRichTextEditor';
 import * as DocumentPicker from 'expo-document-picker';
 import { openUriExternally } from '@/src/services/fileOpener';
 
+type NoteAttachmentMeta = {
+  name?: string;
+  uri?: string;
+  size?: number;
+  mimeType?: string;
+  kind?: 'document' | 'website';
+};
+
 export default function NotesScreen() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -436,7 +444,55 @@ export default function NotesScreen() {
     setNoteFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const parseAttachment = (fileStr: string): NoteAttachmentMeta | undefined => {
+    const trimmed = (fileStr || '').trim();
+    if (!trimmed) return undefined;
+
+    if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith('file://') || trimmed.startsWith('content://')) {
+      return { uri: trimmed };
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed) as NoteAttachmentMeta;
+      return {
+        name: typeof parsed?.name === 'string' ? parsed.name : undefined,
+        uri: typeof parsed?.uri === 'string' ? parsed.uri : undefined,
+        size: parsed?.size,
+        mimeType: typeof parsed?.mimeType === 'string' ? parsed.mimeType : undefined,
+        kind: parsed?.kind === 'website' ? 'website' : parsed?.kind === 'document' ? 'document' : undefined,
+      };
+    } catch {
+      return undefined;
+    }
+  };
+
+  const isDocumentLikeUri = (uri?: string, name?: string, mimeType?: string) => {
+    const lowerUri = (uri || '').toLowerCase();
+    const lowerName = (name || '').toLowerCase();
+    const lowerMime = (mimeType || '').toLowerCase();
+    if (lowerMime.startsWith('application/')) return true;
+    if (lowerMime.startsWith('text/')) return true;
+
+    const value = `${lowerName} ${lowerUri}`;
+    return /(\.pdf|\.docx?|\.xlsx?|\.pptx?|\.txt|\.rtf|\.csv|\.zip|\.rar)(\?|#|$)/.test(value);
+  };
+
+  const isWebsiteAttachment = (fileStr: string) => {
+    const meta = parseAttachment(fileStr);
+    if (meta?.kind === 'website') return true;
+    if (meta?.kind === 'document') return false;
+
+    const uri = (meta?.uri || '').trim();
+    if (!/^https?:\/\//i.test(uri)) return false;
+    return !isDocumentLikeUri(uri, meta?.name, meta?.mimeType);
+  };
+
   const getFileName = (fileStr: string): string => {
+    const directUri = (fileStr || '').trim();
+    if (/^https?:\/\//i.test(directUri)) {
+      return deriveFileNameFromUrl(directUri);
+    }
+
     try {
       const parsed = JSON.parse(fileStr);
       return parsed.name || 'File';
@@ -446,6 +502,15 @@ export default function NotesScreen() {
   };
 
   const getFileUri = (fileStr: string): string | undefined => {
+    const directUri = (fileStr || '').trim();
+    if (
+      /^https?:\/\//i.test(directUri) ||
+      directUri.startsWith('file://') ||
+      directUri.startsWith('content://')
+    ) {
+      return directUri;
+    }
+
     try {
       const parsed = JSON.parse(fileStr);
       return parsed.uri as string | undefined;
@@ -499,6 +564,7 @@ export default function NotesScreen() {
       name: noteUrlName.trim() || deriveFileNameFromUrl(value),
       uri: value,
       size: 0,
+      kind: noteUrlMode === 'document' ? 'document' : 'website',
     });
 
     setNoteFiles((prev) => [...prev, nextAttachment]);
@@ -779,22 +845,49 @@ export default function NotesScreen() {
               />
             </View>
             {selectedNote?.files && selectedNote.files.length > 0 && (
-              <View style={styles.noteFilesSection}>
-                <Text style={[styles.noteFilesLabel, { color: colors.textSecondary }]}>Documents</Text>
-                {selectedNote.files.map((file, index) => (
-                  <TouchableOpacity
-                    key={`${file}-${index}`}
-                    style={[styles.noteFileRow, { borderColor: colors.border, backgroundColor: colors.surface }]}
-                    onPress={() => openFile(file)}
-                  >
-                    <Ionicons name="document-text-outline" size={16} color={colors.primary} />
-                    <Text style={[styles.noteFileName, { color: colors.text }]} numberOfLines={1}>
-                      {getFileName(file)}
-                    </Text>
-                    <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <>
+                {selectedNote.files.filter((file) => !isWebsiteAttachment(file)).length > 0 && (
+                  <View style={styles.noteFilesSection}>
+                    <Text style={[styles.noteFilesLabel, { color: colors.textSecondary }]}>Documents</Text>
+                    {selectedNote.files
+                      .filter((file) => !isWebsiteAttachment(file))
+                      .map((file, index) => (
+                        <TouchableOpacity
+                          key={`doc-${file}-${index}`}
+                          style={[styles.noteFileRow, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                          onPress={() => openFile(file)}
+                        >
+                          <Ionicons name="document-text-outline" size={16} color={colors.primary} />
+                          <Text style={[styles.noteFileName, { color: colors.text }]} numberOfLines={1}>
+                            {getFileName(file)}
+                          </Text>
+                          <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
+                        </TouchableOpacity>
+                      ))}
+                  </View>
+                )}
+
+                {selectedNote.files.filter((file) => isWebsiteAttachment(file)).length > 0 && (
+                  <View style={styles.noteFilesSection}>
+                    <Text style={[styles.noteFilesLabel, { color: colors.textSecondary }]}>Website Links</Text>
+                    {selectedNote.files
+                      .filter((file) => isWebsiteAttachment(file))
+                      .map((file, index) => (
+                        <TouchableOpacity
+                          key={`url-${file}-${index}`}
+                          style={[styles.noteFileRow, { borderColor: colors.border, backgroundColor: colors.surface }]}
+                          onPress={() => openFile(file)}
+                        >
+                          <Ionicons name="globe-outline" size={16} color={colors.primary} />
+                          <Text style={[styles.noteFileName, { color: colors.text }]} numberOfLines={1}>
+                            {getFileName(file)}
+                          </Text>
+                          <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
+                        </TouchableOpacity>
+                      ))}
+                  </View>
+                )}
+              </>
             )}
            </ScrollView>
          </SafeAreaView>

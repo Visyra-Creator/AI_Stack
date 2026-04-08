@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/src/context/ThemeContext';
 
@@ -39,13 +39,17 @@ export const Select: React.FC<SelectProps> = ({
         <Ionicons name="chevron-down" size={20} color={colors.textSecondary} />
       </TouchableOpacity>
 
-      <Modal visible={modalVisible} transparent animationType="fade">
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setModalVisible(false)}
-        >
-          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+      <Modal
+        visible={modalVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        hardwareAccelerated
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setModalVisible(false)} />
+          <View style={[styles.modalContent, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>{label}</Text>
             <ScrollView style={styles.optionsList}>
               {options.map((option, index) => (
@@ -53,6 +57,7 @@ export const Select: React.FC<SelectProps> = ({
                   key={index}
                   style={[styles.optionItem, { borderBottomColor: colors.border }]}
                   onPress={() => selectOption(option)}
+                  activeOpacity={0.7}
                 >
                   <Text style={[styles.optionText, { color: colors.text }]}>{option}</Text>
                   {value === option && (
@@ -62,7 +67,7 @@ export const Select: React.FC<SelectProps> = ({
               ))}
             </ScrollView>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
     </View>
   );
@@ -99,6 +104,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     maxHeight: '70%',
+    borderWidth: 1,
   },
   modalTitle: {
     fontSize: 18,
