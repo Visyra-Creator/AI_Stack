@@ -91,6 +91,18 @@ const parseLegacyUri = (value: unknown): string | undefined => {
   return trimmed;
 };
 
+const isSupportedImageUri = (uri?: string) => {
+  const value = (uri || '').trim().toLowerCase();
+  if (!value) return false;
+  return (
+    value.startsWith('file://') ||
+    value.startsWith('content://') ||
+    value.startsWith('http://') ||
+    value.startsWith('https://') ||
+    value.startsWith('data:image/')
+  );
+};
+
 const PHOTOGRAPHY_MEDIA_DIR_NAME = 'aikeeper-photography';
 
 const getPhotographyMediaDir = () => {
@@ -192,6 +204,7 @@ export default function PhotographyScreen() {
   const [previewSection, setPreviewSection] = useState<SectionId>('images');
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [selectedVideoIds, setSelectedVideoIds] = useState<string[]>([]);
+  const [failedImageIds, setFailedImageIds] = useState<string[]>([]);
   const [imageFilterCategory, setImageFilterCategory] = useState('All');
   const [imageSortBy, setImageSortBy] = useState('Newest');
   const [imageFilterSubsections, setImageFilterSubsections] = useState<string[]>([]);
@@ -253,7 +266,9 @@ export default function PhotographyScreen() {
   }, [categoryOptions, savedImages, savedVideos]);
 
   const displayedImages = useMemo(() => {
-    const filtered = savedImages.filter((item) => {
+    const failedIdSet = new Set(failedImageIds);
+    const validImages = savedImages.filter((item) => isSupportedImageUri(item.uri) && !failedIdSet.has(item.id));
+    const filtered = validImages.filter((item) => {
       if (imageFilterCategory === 'All') return true;
       return item.category === imageFilterCategory;
     });
@@ -274,7 +289,12 @@ export default function PhotographyScreen() {
     }
 
     return sorted;
-  }, [savedImages, imageFilterCategory, imageFilterSubsections, imageSortBy]);
+  }, [savedImages, failedImageIds, imageFilterCategory, imageFilterSubsections, imageSortBy]);
+
+  useEffect(() => {
+    const existingImageIds = new Set(savedImages.map((item) => item.id));
+    setFailedImageIds((prev) => prev.filter((id) => existingImageIds.has(id)));
+  }, [savedImages]);
 
   const displayedVideos = useMemo(() => {
     const filtered = savedVideos.filter((item) => {
@@ -299,6 +319,16 @@ export default function PhotographyScreen() {
 
     return sorted;
   }, [savedVideos, videoFilterCategory, videoFilterSubsections, videoSortBy]);
+
+  useEffect(() => {
+    const existingImageIds = new Set(savedImages.map((item) => item.id));
+    setSelectedImageIds((prev) => prev.filter((id) => existingImageIds.has(id)));
+  }, [savedImages]);
+
+  useEffect(() => {
+    const existingVideoIds = new Set(savedVideos.map((item) => item.id));
+    setSelectedVideoIds((prev) => prev.filter((id) => existingVideoIds.has(id)));
+  }, [savedVideos]);
 
   const handleUploadPress = (section: SectionId) => {
     if (section === 'images') {
@@ -399,6 +429,35 @@ export default function PhotographyScreen() {
           );
           normalized = migrated;
         }
+
+        const validated: SavedImage[] = [];
+        for (const item of normalized) {
+          const normalizedUri = (item.uri || '').trim();
+          if (!isSupportedImageUri(normalizedUri)) {
+            repaired = true;
+            continue;
+          }
+
+          if (normalizedUri.startsWith('file://')) {
+            try {
+              const info = await FileSystem.getInfoAsync(normalizedUri);
+              if (!info.exists) {
+                repaired = true;
+                continue;
+              }
+            } catch {
+              repaired = true;
+              continue;
+            }
+          }
+
+          validated.push({ ...item, uri: normalizedUri });
+        }
+
+        if (validated.length !== normalized.length) {
+          repaired = true;
+        }
+        normalized = validated;
 
         const hadDrops = normalized.length !== parsed.length;
         if (hadDrops) repaired = true;
@@ -694,8 +753,10 @@ export default function PhotographyScreen() {
     setVideoFilterSubsections([]);
   };
 
-  const isImageSelectionMode = selectedImageIds.length > 0;
-  const isVideoSelectionMode = selectedVideoIds.length > 0;
+  const displayedImageIdSet = useMemo(() => new Set(displayedImages.map((item) => item.id)), [displayedImages]);
+  const displayedVideoIdSet = useMemo(() => new Set(displayedVideos.map((item) => item.id)), [displayedVideos]);
+  const isImageSelectionMode = selectedImageIds.some((id) => displayedImageIdSet.has(id));
+  const isVideoSelectionMode = selectedVideoIds.some((id) => displayedVideoIdSet.has(id));
 
   const toggleImageSelection = (id: string) => {
     setSelectedImageIds((prev) =>
@@ -709,6 +770,16 @@ export default function PhotographyScreen() {
       return;
     }
     handleOpenPreview(index, 'images');
+  };
+
+  const handleImageLoadError = (item: SavedImage) => {
+    setFailedImageIds((prev) => (prev.includes(item.id) ? prev : [...prev, item.id]));
+
+    // If a local file is gone, prune it from storage to avoid repeated blank tiles.
+    if (item.uri.startsWith('file://')) {
+      setSavedImages((prev) => prev.filter((img) => img.id !== item.id));
+      setSelectedImageIds((prev) => prev.filter((id) => id !== item.id));
+    }
   };
 
   const toggleVideoSelection = (id: string) => {
@@ -1269,7 +1340,12 @@ export default function PhotographyScreen() {
                     delayLongPress={220}
                     activeOpacity={0.85}
                   >
-                    <Image source={{ uri: item.uri }} style={styles.galleryImage} resizeMode="cover" />
+                    <Image
+                      source={{ uri: item.uri }}
+                      style={styles.galleryImage}
+                      resizeMode="cover"
+                      onError={() => handleImageLoadError(item)}
+                    />
                     {isSelected && (
                       <View style={[styles.selectedBadge, { backgroundColor: colors.primary }]}>
                         <Ionicons name="checkmark" size={12} color="#FFFFFF" />
