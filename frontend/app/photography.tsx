@@ -156,6 +156,46 @@ const persistImageUri = async (uri: string): Promise<string> => {
   return trimmed;
 };
 
+const persistVideoUri = async (uri: string): Promise<string> => {
+  const trimmed = uri.trim();
+  if (!trimmed) return trimmed;
+
+  const mediaDir = getPhotographyMediaDir();
+  if (!mediaDir) return trimmed;
+  if (trimmed.startsWith(mediaDir)) return trimmed;
+
+  try {
+    await FileSystem.makeDirectoryAsync(mediaDir, { intermediates: true });
+  } catch {
+    // Directory may already exist; continue.
+  }
+
+  try {
+    if (trimmed.startsWith('data:video/')) {
+      const dataMatch = trimmed.match(/^data:video\/(\w+);base64,(.*)$/);
+      if (!dataMatch) return trimmed;
+      const ext = (dataMatch[1] || 'mp4').toLowerCase();
+      const base64Data = dataMatch[2] || '';
+      const destination = `${mediaDir}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+      await FileSystem.writeAsStringAsync(destination, base64Data, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      return destination;
+    }
+
+    if (trimmed.startsWith('content://') || trimmed.startsWith('file://')) {
+      const ext = extensionFromUri(trimmed, 'mp4');
+      const destination = `${mediaDir}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+      await FileSystem.copyAsync({ from: trimmed, to: destination });
+      return destination;
+    }
+  } catch {
+    return trimmed;
+  }
+
+  return trimmed;
+};
+
 type PreviewVideoPlayerProps = {
   uri: string;
   shouldPlay: boolean;
@@ -424,16 +464,14 @@ export default function PhotographyScreen() {
           .filter((item): item is SavedImage => !!item);
 
         let normalized = normalizedWithMaybeLegacyUris;
-        if (!imageUriMigrationDone) {
-          const migrated = await Promise.all(
-            normalizedWithMaybeLegacyUris.map(async (item) => {
-              const nextUri = await persistImageUri(item.uri);
-              if (nextUri !== item.uri) repaired = true;
-              return nextUri === item.uri ? item : { ...item, uri: nextUri };
-            }),
-          );
-          normalized = migrated;
-        }
+        const migrated = await Promise.all(
+          normalizedWithMaybeLegacyUris.map(async (item) => {
+            const nextUri = await persistImageUri(item.uri);
+            if (nextUri !== item.uri) repaired = true;
+            return nextUri === item.uri ? item : { ...item, uri: nextUri };
+          }),
+        );
+        normalized = migrated;
 
         const validated: SavedImage[] = [];
         for (const item of normalized) {
@@ -516,41 +554,56 @@ export default function PhotographyScreen() {
         }
 
         let repaired = false;
-        const normalized = parsed
-          .map((item) => {
-            if (!item || typeof item !== 'object') return null;
-            const uri = parseLegacyUri((item as any).uri);
-            if (!uri) return null;
+        const normalized = await Promise.all(
+          parsed
+            .map((item) => {
+              if (!item || typeof item !== 'object') return null;
+              const uri = parseLegacyUri((item as any).uri);
+              if (!uri) return null;
 
-            const id = typeof (item as any).id === 'string' && (item as any).id.trim().length > 0
-              ? (item as any).id.trim()
-              : makeFallbackId('vid', Math.floor(Math.random() * 10000));
-            const thumbnailUri = parseLegacyUri((item as any).thumbnailUri);
-            const category = normalizeTextField((item as any).category, 'Uncategorized');
-            const style = normalizeTextField((item as any).style, 'Unstyled');
-            const subsection = normalizeTextField((item as any).subsection, '');
+              const id = typeof (item as any).id === 'string' && (item as any).id.trim().length > 0
+                ? (item as any).id.trim()
+                : makeFallbackId('vid', Math.floor(Math.random() * 10000));
+              const thumbnailUri = parseLegacyUri((item as any).thumbnailUri);
+              const category = normalizeTextField((item as any).category, 'Uncategorized');
+              const style = normalizeTextField((item as any).style, 'Unstyled');
+              const subsection = normalizeTextField((item as any).subsection, '');
 
-            if (
-              (item as any).id !== id ||
-              (item as any).uri !== uri ||
-              (item as any).thumbnailUri !== thumbnailUri ||
-              (item as any).category !== category ||
-              (item as any).style !== style ||
-              (item as any).subsection !== subsection
-            ) {
+              if (
+                (item as any).id !== id ||
+                (item as any).uri !== uri ||
+                (item as any).thumbnailUri !== thumbnailUri ||
+                (item as any).category !== category ||
+                (item as any).style !== style ||
+                (item as any).subsection !== subsection
+              ) {
+                repaired = true;
+              }
+
+              return {
+                id,
+                uri,
+                thumbnailUri,
+                category,
+                style,
+                subsection,
+              } as SavedVideo;
+            })
+            .filter((item): item is SavedVideo => !!item),
+        ).then((items) => Promise.all(
+          items.map(async (item) => {
+            const nextUri = await persistVideoUri(item.uri);
+            const nextThumb = item.thumbnailUri ? await persistImageUri(item.thumbnailUri) : undefined;
+            if (nextUri !== item.uri || nextThumb !== item.thumbnailUri) {
               repaired = true;
             }
-
             return {
-              id,
-              uri,
-              thumbnailUri,
-              category,
-              style,
-              subsection,
+              ...item,
+              uri: nextUri,
+              thumbnailUri: nextThumb,
             } as SavedVideo;
-          })
-          .filter((item): item is SavedVideo => !!item);
+          }),
+        ));
 
         const hadDrops = normalized.length !== parsed.length;
         if (hadDrops) repaired = true;
@@ -732,21 +785,42 @@ export default function PhotographyScreen() {
     setIsSavingVideoForm(true);
     try {
       const timestamp = Date.now();
-      const thumbnailResults = await Promise.all(videoForm.videos.map((uri) => generateVideoThumbnail(uri)));
-
-      const newSavedVideos = videoForm.videos.map((uri, index) => ({
+      const subsectionValue = videoForm.subsection.trim();
+      const immediateVideos: SavedVideo[] = videoForm.videos.map((uri, index) => ({
         id: `${timestamp}-${index}`,
         uri,
-        thumbnailUri: thumbnailResults[index],
+        thumbnailUri: videoFormThumbnails[index],
         category: videoForm.category,
         style: videoForm.style,
-        subsection: videoForm.subsection.trim(),
+        subsection: subsectionValue,
       }));
 
-      setSavedVideos((prev) => [...newSavedVideos, ...prev]);
-      Alert.alert('Saved', `${videoForm.videos.length} video(s) added to Videos section.`);
+      // Render immediately with existing thumbnails from selection step.
+      setSavedVideos((prev) => [...immediateVideos, ...prev]);
       resetVideoForm();
       setVideoFormVisible(false);
+      Alert.alert('Saved', `${immediateVideos.length} video(s) added to Videos section.`);
+
+      // Backfill only missing thumbnails in background without blocking save UX.
+      const missing = immediateVideos.filter((item) => !item.thumbnailUri);
+      if (missing.length > 0) {
+        void (async () => {
+          const resolved = await Promise.all(
+            missing.map(async (item) => ({
+              id: item.id,
+              thumbnailUri: await generateVideoThumbnail(item.uri),
+            })),
+          );
+
+          setSavedVideos((prev) =>
+            prev.map((video) => {
+              const patch = resolved.find((entry) => entry.id === video.id);
+              if (!patch?.thumbnailUri) return video;
+              return { ...video, thumbnailUri: patch.thumbnailUri };
+            }),
+          );
+        })();
+      }
     } finally {
       setIsSavingVideoForm(false);
     }

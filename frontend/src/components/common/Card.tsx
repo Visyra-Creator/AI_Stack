@@ -15,9 +15,12 @@ interface CardProps {
   isDeleteLoading?: boolean;
   children?: React.ReactNode;
   tags?: string[];
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+  testID?: string;
 }
 
-export const Card: React.FC<CardProps> = ({
+const CardComponent: React.FC<CardProps> = ({
   title,
   subtitle,
   subtitleLines = 2,
@@ -29,14 +32,24 @@ export const Card: React.FC<CardProps> = ({
   isDeleteLoading = false,
   children,
   tags,
+  accessibilityLabel,
+  accessibilityHint,
+  testID,
 }) => {
   const { colors } = useTheme();
+  const cardAccessibilityLabel = accessibilityLabel ?? title;
 
   return (
     <TouchableOpacity
       style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
       onPress={onPress}
+      disabled={!onPress}
       activeOpacity={onPress ? 0.7 : 1}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={cardAccessibilityLabel}
+      accessibilityHint={onPress ? accessibilityHint : undefined}
+      accessibilityState={{ disabled: !onPress }}
+      testID={testID}
     >
       <View style={styles.header}>
         <View style={styles.titleContainer}>
@@ -56,6 +69,8 @@ export const Card: React.FC<CardProps> = ({
               }}
               style={styles.iconButton}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel={isFavorite ? `Unfavorite ${title}` : `Favorite ${title}`}
             >
               <Ionicons
                 name={isFavorite ? 'heart' : 'heart-outline'}
@@ -72,6 +87,8 @@ export const Card: React.FC<CardProps> = ({
               }}
               style={styles.iconButton}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel={`Edit ${title}`}
             >
               <Ionicons name="pencil" size={18} color={colors.primary} />
             </TouchableOpacity>
@@ -85,6 +102,9 @@ export const Card: React.FC<CardProps> = ({
               style={styles.iconButton}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               disabled={isDeleteLoading}
+              accessibilityRole="button"
+              accessibilityLabel={`Delete ${title}`}
+              accessibilityState={{ disabled: isDeleteLoading, busy: isDeleteLoading }}
             >
               {isDeleteLoading ? (
                 <ActivityIndicator size="small" color={colors.danger} />
@@ -98,7 +118,7 @@ export const Card: React.FC<CardProps> = ({
       {tags && tags.length > 0 && (
         <View style={styles.tagsContainer}>
           {tags.map((tag, index) => (
-            <View key={index} style={[styles.tag, { backgroundColor: colors.primary + '20' }]}>
+            <View key={`${tag}-${index}`} style={[styles.tag, { backgroundColor: colors.primary + '20' }]}>
               <Text style={[styles.tagText, { color: colors.primary }]}>{tag}</Text>
             </View>
           ))}
@@ -108,6 +128,10 @@ export const Card: React.FC<CardProps> = ({
     </TouchableOpacity>
   );
 };
+
+CardComponent.displayName = 'Card';
+
+export const Card = React.memo(CardComponent);
 
 const styles = StyleSheet.create({
   card: {
@@ -138,7 +162,11 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   iconButton: {
-    padding: 4,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   tagsContainer: {
     flexDirection: 'row',

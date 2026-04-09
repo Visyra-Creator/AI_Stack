@@ -15,6 +15,7 @@ import {
   useWindowDimensions,
   Linking,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -73,9 +74,6 @@ export default function ContentCreationScreen() {
 
   // Optimistic save hook
   const { isSaving, executeSave } = useOptimisticSave({
-    onSaveSuccess: () => {
-      loadItems();
-    },
     onSaveError: (error) => {
       Alert.alert('Error', 'Failed to save. Please try again.');
       console.error('Save error:', error);
@@ -430,8 +428,15 @@ export default function ContentCreationScreen() {
     await executeSave(async () => {
       if (editingItem) {
         await contentCreationStorage.update(editingItem.id, formData);
+        const updatedItem: ContentCreationItem = {
+          ...editingItem,
+          ...formData,
+          updatedAt: Date.now(),
+        };
+        setItems((prev) => prev.map((item) => (item.id === editingItem.id ? updatedItem : item)));
       } else {
-        await contentCreationStorage.add(formData);
+        const createdItem = await contentCreationStorage.add(formData);
+        setItems((prev) => [createdItem, ...prev]);
       }
     });
 

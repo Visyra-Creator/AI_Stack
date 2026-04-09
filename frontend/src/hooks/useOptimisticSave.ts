@@ -23,11 +23,15 @@ export function useOptimisticSave(options: OptimisticSaveOptions = {}) {
   } = options;
 
   const [isSaving, setIsSaving] = useState(false);
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastSaveTimeRef = useRef<number>(0);
+  const savingRef = useRef(false);
 
   const executeSave = useCallback(
     async (saveOperation: () => Promise<void>) => {
+      if (savingRef.current) {
+        return;
+      }
+
       // Prevent duplicate saves within debounce window
       const now = Date.now();
       if (now - lastSaveTimeRef.current < debounceMs) {
@@ -35,34 +39,26 @@ export function useOptimisticSave(options: OptimisticSaveOptions = {}) {
       }
       lastSaveTimeRef.current = now;
 
-      // Clear any pending debounce timer
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-
       // Show loading immediately
+      savingRef.current = true;
       setIsSaving(true);
       onSaveStart?.();
 
-      // Execute save in background (non-blocking)
-      debounceTimerRef.current = setTimeout(async () => {
-        try {
-          await saveOperation();
-          onSaveSuccess?.();
-        } catch (error) {
-          onSaveError?.(error instanceof Error ? error : new Error(String(error)));
-        } finally {
-          setIsSaving(false);
-        }
-      }, 0);
+      try {
+        await saveOperation();
+        onSaveSuccess?.();
+      } catch (error) {
+        onSaveError?.(error instanceof Error ? error : new Error(String(error)));
+      } finally {
+        savingRef.current = false;
+        setIsSaving(false);
+      }
     },
     [debounceMs, onSaveStart, onSaveSuccess, onSaveError]
   );
 
   const cleanup = useCallback(() => {
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
+    savingRef.current = false;
   }, []);
 
   return {

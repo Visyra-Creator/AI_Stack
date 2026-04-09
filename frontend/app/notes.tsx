@@ -152,26 +152,50 @@ export default function NotesScreen() {
 
      try {
        const contentToSave = noteContent.trim();
+       const now = Date.now();
 
        if (editingNoteId) {
+         const existingNote = notes.find((note) => note.id === editingNoteId);
          await notesStorage.update(editingNoteId, {
-            title: noteTitle.trim(),
+           title: noteTitle.trim(),
            content: contentToSave,
-            richContent: noteStructuredContent,
-            contentVersion: 3,
-            files: noteFiles,
-            sectionId: selectedSectionId,
+           richContent: noteStructuredContent,
+           contentVersion: 3,
+           files: noteFiles,
+           sectionId: selectedSectionId,
          });
+
+         if (existingNote) {
+           const updatedNote: Note = {
+             ...existingNote,
+             title: noteTitle.trim(),
+             content: contentToSave,
+             richContent: noteStructuredContent,
+             contentVersion: 3,
+             files: noteFiles,
+             sectionId: selectedSectionId,
+             updatedAt: now,
+           };
+           setNotes((prev) =>
+             prev
+               .map((note) => (note.id === editingNoteId ? updatedNote : note))
+               .sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt)),
+           );
+           if (selectedNote?.id === editingNoteId) {
+             setSelectedNote(updatedNote);
+           }
+         }
        } else {
-         await notesStorage.add({
-            title: noteTitle.trim(),
+         const createdNote = await notesStorage.add({
+           title: noteTitle.trim(),
            content: contentToSave,
-            richContent: noteStructuredContent,
-            contentVersion: 3,
-            files: noteFiles,
-            sectionId: selectedSectionId,
-            updatedAt: Date.now(),
+           richContent: noteStructuredContent,
+           contentVersion: 3,
+           files: noteFiles,
+           sectionId: selectedSectionId,
+           updatedAt: now,
          });
+         setNotes((prev) => [createdNote, ...prev]);
        }
 
        setNoteTitle('');
@@ -183,15 +207,15 @@ export default function NotesScreen() {
        setNoteUrlModalVisible(false);
        setEditingNoteId(null);
        setEditorModalVisible(false);
-       await loadNotes();
+
        if (cloudSyncEnabled) {
-         setLastSyncedAt(Date.now());
+         setLastSyncedAt(now);
        }
      } catch (error) {
        console.error('Error saving note:', error);
        Alert.alert('Error', 'Failed to save note.');
      }
-   }, [noteTitle, noteContent, noteStructuredContent, noteFiles, selectedSectionId, editingNoteId, loadNotes, cloudSyncEnabled]);
+   }, [noteTitle, noteContent, noteStructuredContent, noteFiles, selectedSectionId, editingNoteId, cloudSyncEnabled, notes, selectedNote]);
 
   const deleteNote = useCallback(
     async (noteId: string) => {
@@ -201,13 +225,20 @@ export default function NotesScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            const previousNotes = notes;
             try {
+              setNotes((prev) => prev.filter((note) => note.id !== noteId));
+              if (selectedNote?.id === noteId) {
+                setSelectedNote(null);
+                setNoteDetailsModalVisible(false);
+              }
+
               await notesStorage.delete(noteId);
-              await loadNotes();
               if (cloudSyncEnabled) {
                 setLastSyncedAt(Date.now());
               }
             } catch (error) {
+              setNotes(previousNotes);
               console.error('Error deleting note:', error);
               Alert.alert('Error', 'Failed to delete note.');
             }
@@ -215,7 +246,7 @@ export default function NotesScreen() {
         },
       ]);
     },
-    [loadNotes, cloudSyncEnabled]
+    [cloudSyncEnabled, notes, selectedNote]
   );
 
   const createSection = useCallback(async () => {
@@ -236,23 +267,32 @@ export default function NotesScreen() {
         return;
       }
 
+      const now = Date.now();
+
       if (editingSectionId) {
         await noteSectionsStorage.update(editingSectionId, {
           name: normalizedName,
-          updatedAt: Date.now(),
+          updatedAt: now,
         });
+        setSections((prev) =>
+          prev.map((section) =>
+            section.id === editingSectionId
+              ? { ...section, name: normalizedName, updatedAt: now }
+              : section,
+          ),
+        );
       } else {
         const newSection = await noteSectionsStorage.add({
           name: normalizedName,
-          updatedAt: Date.now(),
+          updatedAt: now,
         });
+        setSections((prev) => [...prev, newSection]);
         setSelectedSectionId(newSection.id);
       }
 
       setNewSectionName('');
       setEditingSectionId(null);
       setShowSectionModal(false);
-      await loadSections();
       if (cloudSyncEnabled) {
         setLastSyncedAt(Date.now());
       }
@@ -260,7 +300,7 @@ export default function NotesScreen() {
       console.error('Error creating section:', error);
       Alert.alert('Error', 'Failed to create section.');
     }
-  }, [newSectionName, sections, editingSectionId, loadSections, cloudSyncEnabled]);
+  }, [newSectionName, sections, editingSectionId, cloudSyncEnabled]);
 
   const startEditSection = useCallback((section: Section) => {
     setEditingSectionId(section.id);

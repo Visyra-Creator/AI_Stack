@@ -71,9 +71,6 @@ export default function ToolsScreen() {
 
   // Optimistic save hook
   const { isSaving, executeSave } = useOptimisticSave({
-    onSaveSuccess: () => {
-      loadItems();
-    },
     onSaveError: (error) => {
       Alert.alert('Error', 'Failed to save. Please try again.');
       console.error('Save error:', error);
@@ -287,8 +284,15 @@ export default function ToolsScreen() {
     await executeSave(async () => {
       if (editingItem) {
         await toolStorage.update(editingItem.id, normalizedFormData);
+        const updatedItem: ToolItem = {
+          ...editingItem,
+          ...normalizedFormData,
+          updatedAt: Date.now(),
+        };
+        setItems((prev) => prev.map((item) => (item.id === editingItem.id ? updatedItem : item)));
       } else {
-        await toolStorage.add(normalizedFormData);
+        const createdItem = await toolStorage.add(normalizedFormData);
+        setItems((prev) => [createdItem, ...prev]);
       }
     });
 

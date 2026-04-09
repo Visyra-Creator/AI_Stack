@@ -83,9 +83,6 @@ export default function ReferenceScreen() {
 
   // Optimistic save hook
   const { isSaving, executeSave } = useOptimisticSave({
-    onSaveSuccess: () => {
-      loadItems();
-    },
     onSaveError: (error) => {
       Alert.alert('Error', 'Failed to save. Please try again.');
       console.error('Save error:', error);
@@ -147,8 +144,15 @@ export default function ReferenceScreen() {
     await executeSave(async () => {
       if (editingItem) {
         await referenceStorage.update(editingItem.id, formData);
+        const updatedItem: ReferenceItem = {
+          ...editingItem,
+          ...formData,
+          updatedAt: Date.now(),
+        };
+        setItems((prev) => prev.map((item) => (item.id === editingItem.id ? updatedItem : item)));
       } else {
-        await referenceStorage.add(formData);
+        const createdItem = await referenceStorage.add(formData);
+        setItems((prev) => [createdItem, ...prev]);
       }
     });
 

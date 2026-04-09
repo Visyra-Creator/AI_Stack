@@ -104,9 +104,6 @@ export default function WebsiteScreen() {
   const [editingCategoryName, setEditingCategoryName] = useState('');
 
   const { isSaving, executeSave } = useOptimisticSave({
-    onSaveSuccess: () => {
-      loadItems();
-    },
     onSaveError: () => {
       Alert.alert('Error', 'Failed to save. Please try again.');
     },
@@ -202,8 +199,15 @@ export default function WebsiteScreen() {
     await executeSave(async () => {
       if (editingItem) {
         await websiteStorage.update(editingItem.id, payload);
+        const updatedItem: WebsiteItem = {
+          ...editingItem,
+          ...payload,
+          updatedAt: Date.now(),
+        };
+        setItems((prev) => prev.map((item) => (item.id === editingItem.id ? updatedItem : item)));
       } else {
-        await websiteStorage.add(payload);
+        const createdItem = await websiteStorage.add(payload);
+        setItems((prev) => [createdItem, ...prev]);
       }
     });
 
@@ -223,7 +227,7 @@ export default function WebsiteScreen() {
 
           try {
             await websiteStorage.delete(item.id);
-          } catch (error) {
+          } catch {
             // Revert on failure
             await loadItems();
             Alert.alert('Error', 'Failed to delete. Please try again.');
@@ -294,7 +298,7 @@ export default function WebsiteScreen() {
 
     try {
       await websiteCategoryStorage.saveAll(updatedCategories);
-    } catch (error) {
+    } catch {
       // Revert on failure
       setCategories(categories);
       setNewCategoryName(value);
@@ -364,7 +368,7 @@ export default function WebsiteScreen() {
       }));
 
       await loadItems();
-    } catch (error) {
+    } catch {
       // Revert on failure
       setCategories(categories);
       setEditingCategory(editingCategory);
@@ -415,7 +419,7 @@ export default function WebsiteScreen() {
               }
 
               await loadItems();
-            } catch (error) {
+            } catch {
               // Revert on failure
               setCategories(categories);
               if (activeFilter === 'All') {

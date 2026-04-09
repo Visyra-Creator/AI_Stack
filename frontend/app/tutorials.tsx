@@ -78,9 +78,6 @@ export default function TutorialsScreen() {
 
   // Optimistic save hook
   const { isSaving, executeSave } = useOptimisticSave({
-    onSaveSuccess: () => {
-      loadItems();
-    },
     onSaveError: (error) => {
       Alert.alert('Error', 'Failed to save. Please try again.');
       console.error('Save error:', error);
@@ -372,8 +369,15 @@ export default function TutorialsScreen() {
     await executeSave(async () => {
       if (editingItem) {
         await tutorialsStorage.update(editingItem.id, normalizedFormData);
+        const updatedItem: TutorialItem = {
+          ...editingItem,
+          ...normalizedFormData,
+          updatedAt: Date.now(),
+        };
+        setItems((prev) => prev.map((item) => (item.id === editingItem.id ? updatedItem : item)));
       } else {
-        await tutorialsStorage.add(normalizedFormData);
+        const createdItem = await tutorialsStorage.add(normalizedFormData);
+        setItems((prev) => [createdItem, ...prev]);
       }
     });
 

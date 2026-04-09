@@ -77,9 +77,6 @@ export default function BusinessScreen() {
 
   // Optimistic save hook
   const { isSaving, executeSave } = useOptimisticSave({
-    onSaveSuccess: () => {
-      loadItems();
-    },
     onSaveError: (error) => {
       Alert.alert('Error', 'Failed to save. Please try again.');
       console.error('Save error:', error);
@@ -235,8 +232,15 @@ export default function BusinessScreen() {
     await executeSave(async () => {
       if (editingItem) {
         await businessStorage.update(editingItem.id, formData);
+        const updatedItem: BusinessItem = {
+          ...editingItem,
+          ...formData,
+          updatedAt: Date.now(),
+        };
+        setItems((prev) => prev.map((item) => (item.id === editingItem.id ? updatedItem : item)));
       } else {
-        await businessStorage.add(formData);
+        const createdItem = await businessStorage.add(formData);
+        setItems((prev) => [createdItem, ...prev]);
       }
     });
 

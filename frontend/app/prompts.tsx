@@ -74,9 +74,6 @@ export default function PromptsScreen() {
 
   // Optimistic save hook
   const { isSaving, executeSave } = useOptimisticSave({
-    onSaveSuccess: () => {
-      loadItems();
-    },
     onSaveError: (error) => {
       Alert.alert('Error', 'Failed to save. Please try again.');
       console.error('Save error:', error);
@@ -313,7 +310,7 @@ export default function PromptsScreen() {
     setDetailsVisible(true);
   };
 
-  const handleSave = useCallback(async () => {
+  const handleSave = async () => {
     if (!formData.promptName.trim()) {
       Alert.alert('Error', 'Prompt name is required');
       return;
@@ -337,13 +334,23 @@ export default function PromptsScreen() {
     await executeSave(async () => {
       if (editingItem) {
         await promptsStorage.update(editingItem.id, payload);
+        const updatedItem: PromptItem = {
+          ...editingItem,
+          ...payload,
+          updatedAt: Date.now(),
+        };
+        setItems((prev) => prev.map((item) => (item.id === editingItem.id ? updatedItem : item)));
+        if (selectedItem?.id === editingItem.id) {
+          setSelectedItem(updatedItem);
+        }
       } else {
-        await promptsStorage.add(payload);
+        const createdItem = await promptsStorage.add(payload);
+        setItems((prev) => [createdItem, ...prev]);
       }
     });
 
     resetForm();
-  }, [formData, editingItem, executeSave]);
+  };
 
   const handleDelete = (item: PromptItem) => {
     Alert.alert('Delete', `Are you sure you want to delete "${item.promptName}"?`, [
@@ -437,8 +444,6 @@ export default function PromptsScreen() {
       Alert.alert('Unable to open file', result.reason || 'No app is available to open this file type.');
     }
   };
-
-  const baseItems = items.filter(item => item.type === activeTab);
 
   const filteredItems = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
@@ -534,15 +539,6 @@ export default function PromptsScreen() {
 
   const categoryConfig = getCategoryFieldConfig(formData.categories?.[0] || getDefaultCategory());
 
-  const getCategoryIcon = (category: string): keyof typeof Ionicons.glyphMap => {
-    switch (category) {
-      case 'image': return 'image-outline';
-      case 'video': return 'videocam-outline';
-      case 'text': return 'document-text-outline';
-      case 'audio': return 'musical-notes-outline';
-      default: return 'ellipsis-horizontal';
-    }
-  };
 
   const getPromptPreviewLine = (item: PromptItem) => {
     const raw = (item.description?.trim() || item.prompt?.trim() || '').trim();

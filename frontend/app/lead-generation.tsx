@@ -72,9 +72,6 @@ export default function LeadGenerationScreen() {
 
   // Optimistic save hook
   const { isSaving, executeSave } = useOptimisticSave({
-    onSaveSuccess: () => {
-      loadItems();
-    },
     onSaveError: (error) => {
       Alert.alert('Error', 'Failed to save. Please try again.');
       console.error('Save error:', error);
@@ -312,8 +309,15 @@ export default function LeadGenerationScreen() {
     await executeSave(async () => {
       if (editingItem) {
         await leadGenerationStorage.update(editingItem.id, formData);
+        const updatedItem: LeadGenerationItem = {
+          ...editingItem,
+          ...formData,
+          updatedAt: Date.now(),
+        };
+        setItems((prev) => prev.map((item) => (item.id === editingItem.id ? updatedItem : item)));
       } else {
-        await leadGenerationStorage.add(formData);
+        const createdItem = await leadGenerationStorage.add(formData);
+        setItems((prev) => [createdItem, ...prev]);
       }
     });
 

@@ -73,9 +73,6 @@ export default function OpenSourceScreen() {
 
   // Optimistic save hook
   const { isSaving, executeSave } = useOptimisticSave({
-    onSaveSuccess: () => {
-      loadItems();
-    },
     onSaveError: (error) => {
       Alert.alert('Error', 'Failed to save. Please try again.');
       console.error('Save error:', error);
@@ -319,10 +316,18 @@ export default function OpenSourceScreen() {
     setModalVisible(false);
 
     await executeSave(async () => {
+      const payload = { ...formData, links: cleanedLinks };
       if (editingItem) {
-        await openSourceStorage.update(editingItem.id, { ...formData, links: cleanedLinks });
+        await openSourceStorage.update(editingItem.id, payload);
+        const updatedItem: OpenSourceItem = {
+          ...editingItem,
+          ...payload,
+          updatedAt: Date.now(),
+        };
+        setItems((prev) => prev.map((item) => (item.id === editingItem.id ? updatedItem : item)));
       } else {
-        await openSourceStorage.add({ ...formData, links: cleanedLinks });
+        const createdItem = await openSourceStorage.add(payload);
+        setItems((prev) => [createdItem, ...prev]);
       }
     });
 

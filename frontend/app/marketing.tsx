@@ -68,9 +68,6 @@ export default function MarketingScreen() {
 
   // Optimistic save hook
   const { isSaving, executeSave } = useOptimisticSave({
-    onSaveSuccess: () => {
-      loadItems();
-    },
     onSaveError: (error) => {
       Alert.alert('Error', 'Failed to save. Please try again.');
       console.error('Save error:', error);
@@ -277,8 +274,15 @@ export default function MarketingScreen() {
     await executeSave(async () => {
       if (editingItem) {
         await marketingStorage.update(editingItem.id, payload);
+        const updatedItem: MarketingItem = {
+          ...editingItem,
+          ...payload,
+          updatedAt: Date.now(),
+        };
+        setItems((prev) => prev.map((item) => (item.id === editingItem.id ? updatedItem : item)));
       } else {
-        await marketingStorage.add(payload);
+        const createdItem = await marketingStorage.add(payload);
+        setItems((prev) => [createdItem, ...prev]);
       }
     });
 
