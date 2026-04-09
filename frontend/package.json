@@ -7,6 +7,8 @@
     "start:dev-client": "expo start --dev-client",
     "reset-project": "node ./scripts/reset-project.js",
     "check:app-config": "node ./scripts/check-app-config.js",
+    "check:android-sdk": "node ./scripts/check-android-sdk.js",
+    "eas-build-pre-build": "node ./scripts/setup-android-local-properties.js",
     "pb:start": "zsh ../backend/pocketbase/start-pocketbase.sh ${PORT:-8090}",
     "pb:stop": "zsh ../backend/pocketbase/stop-pocketbase.sh",
     "pb:restart": "npm run pb:stop && npm run pb:start",
@@ -14,7 +16,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "doctor:local": "npm run check:app-config && npm run lint -- --quiet",
+    "doctor:local": "npm run check:android-sdk && npm run check:app-config && npm run lint -- --quiet",
     "doctor": "npx expo-doctor || npm run doctor:local"
   },
   "dependencies": {

@@ -39,6 +39,22 @@ java -version
 
 If `java -version` still shows Java 26, open a new terminal window or check for other shell startup files overriding `JAVA_HOME` or `PATH`.
 
+If Gradle reports `SDK location not found`, make sure Android Studio's SDK is installed and either `ANDROID_HOME` or `ANDROID_SDK_ROOT` points to it. The build hook `eas-build-pre-build` now writes `android/local.properties` automatically when that environment variable is available.
+
+Example:
+
+```bash
+export ANDROID_SDK_ROOT="$HOME/Library/Android/sdk"
+```
+
+You can also run a quick preflight check:
+
+```bash
+npm run check:android-sdk
+```
+
+It prints whether the SDK path is set and whether `android/local.properties` is already present or will be generated during the build hook.
+
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
 ## Get a fresh project
