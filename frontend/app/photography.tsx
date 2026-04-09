@@ -21,6 +21,7 @@ type SavedImage = {
   category: string;
   style: string;
   subsection?: string;
+  shootDone?: boolean;
 };
 
 type SavedVideo = {
@@ -30,9 +31,11 @@ type SavedVideo = {
   category: string;
   style: string;
   subsection?: string;
+  shootDone?: boolean;
 };
 
 type SubsectionSection = SectionId;
+type ShootFilter = 'All' | 'Done' | 'Pending';
 
 const DEFAULT_CATEGORY_OPTIONS = [
   'Weddings',
@@ -73,6 +76,8 @@ const normalizeTextField = (value: unknown, fallback: string) => {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : fallback;
 };
+
+const normalizeShootDoneField = (value: unknown) => value === true;
 
 const normalizeSubsectionValue = (value?: string) => (value || '').trim().toLowerCase();
 
@@ -199,9 +204,10 @@ const persistVideoUri = async (uri: string): Promise<string> => {
 type PreviewVideoPlayerProps = {
   uri: string;
   shouldPlay: boolean;
+  playerHeight?: number;
 };
 
-function PreviewVideoPlayer({ uri, shouldPlay }: PreviewVideoPlayerProps) {
+function PreviewVideoPlayer({ uri, shouldPlay, playerHeight }: PreviewVideoPlayerProps) {
   const player = useVideoPlayer(uri, (createdPlayer) => {
     createdPlayer.loop = false;
   });
@@ -217,7 +223,7 @@ function PreviewVideoPlayer({ uri, shouldPlay }: PreviewVideoPlayerProps) {
   return (
     <VideoView
       player={player}
-      style={styles.previewVideoPlayer}
+      style={[styles.previewVideoPlayer, playerHeight ? { height: playerHeight } : null]}
       contentFit="contain"
       nativeControls
       fullscreenOptions={{ enable: true }}
@@ -230,7 +236,7 @@ export default function PhotographyScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { width: viewportWidth } = useWindowDimensions();
+  const { width: viewportWidth, height: viewportHeight } = useWindowDimensions();
   const [activeSection, setActiveSection] = useState<SectionId>('images');
   const [imageFormVisible, setImageFormVisible] = useState(false);
   const [savedImages, setSavedImages] = useState<SavedImage[]>([]);
@@ -253,11 +259,15 @@ export default function PhotographyScreen() {
   const [imageFilterSubsections, setImageFilterSubsections] = useState<string[]>([]);
   const [videoFilterCategory, setVideoFilterCategory] = useState('All');
   const [videoSortBy, setVideoSortBy] = useState('Newest');
-  const [videoFilterSubsections, setVideoFilterSubsections] = useState<string[]>([]);
-  const [imageFilterModalVisible, setImageFilterModalVisible] = useState(false);
-  const [imageSortModalVisible, setImageSortModalVisible] = useState(false);
-  const [videoFilterModalVisible, setVideoFilterModalVisible] = useState(false);
-  const [videoSortModalVisible, setVideoSortModalVisible] = useState(false);
+   const [videoFilterSubsections, setVideoFilterSubsections] = useState<string[]>([]);
+   const [imageShootFilter, setImageShootFilter] = useState<ShootFilter>('All');
+   const [videoShootFilter, setVideoShootFilter] = useState<ShootFilter>('All');
+   const [imageShootMenuVisible, setImageShootMenuVisible] = useState(false);
+   const [videoShootMenuVisible, setVideoShootMenuVisible] = useState(false);
+   const [imageFilterModalVisible, setImageFilterModalVisible] = useState(false);
+   const [imageSortModalVisible, setImageSortModalVisible] = useState(false);
+   const [videoFilterModalVisible, setVideoFilterModalVisible] = useState(false);
+   const [videoSortModalVisible, setVideoSortModalVisible] = useState(false);
   const [manageCategoryModalVisible, setManageCategoryModalVisible] = useState(false);
   const [manageStyleModalVisible, setManageStyleModalVisible] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -297,6 +307,12 @@ export default function PhotographyScreen() {
   const galleryHorizontalPadding = 24;
   const galleryAvailableWidth = Math.max(240, viewportWidth - (galleryHorizontalPadding * 2));
   const thumbnailSize = Math.floor((galleryAvailableWidth - (galleryGap * (galleryColumns - 1))) / galleryColumns);
+  const previewSideInset = Math.max(12, insets.left, insets.right);
+  const previewTopInset = Math.max(12, insets.top);
+  const previewBottomInset = Math.max(12, insets.bottom);
+  const previewMaxWidth = Math.max(260, viewportWidth - (previewSideInset * 2));
+  const previewMediaMaxHeight = Math.max(220, viewportHeight - previewTopInset - previewBottomInset - 124);
+  const previewVideoPlayerHeight = Math.min(520, Math.max(220, previewMediaMaxHeight - 28));
   const isDesktopLike = viewportWidth >= 900;
   const contentBottomPadding = isDesktopLike
     ? Math.max(insets.bottom, 80)
@@ -323,7 +339,13 @@ export default function PhotographyScreen() {
       return selectedSubsections.has(normalizeSubsectionValue(item.subsection));
     });
 
-    const sorted = [...subsectionFiltered];
+    const shootFiltered = subsectionFiltered.filter((item) => {
+      if (imageShootFilter === 'All') return true;
+      if (imageShootFilter === 'Done') return item.shootDone === true;
+      return item.shootDone !== true;
+    });
+
+    const sorted = [...shootFiltered];
     if (imageSortBy === 'Oldest') {
       sorted.reverse();
     } else if (imageSortBy === 'Category') {
@@ -333,7 +355,7 @@ export default function PhotographyScreen() {
     }
 
     return sorted;
-  }, [savedImages, failedImageIds, imageFilterCategory, imageFilterSubsections, imageSortBy]);
+  }, [savedImages, failedImageIds, imageFilterCategory, imageFilterSubsections, imageShootFilter, imageSortBy]);
 
   useEffect(() => {
     const existingImageIds = new Set(savedImages.map((item) => item.id));
@@ -352,7 +374,13 @@ export default function PhotographyScreen() {
       return selectedSubsections.has(normalizeSubsectionValue(item.subsection));
     });
 
-    const sorted = [...subsectionFiltered];
+    const shootFiltered = subsectionFiltered.filter((item) => {
+      if (videoShootFilter === 'All') return true;
+      if (videoShootFilter === 'Done') return item.shootDone === true;
+      return item.shootDone !== true;
+    });
+
+    const sorted = [...shootFiltered];
     if (videoSortBy === 'Oldest') {
       sorted.reverse();
     } else if (videoSortBy === 'Category') {
@@ -362,7 +390,7 @@ export default function PhotographyScreen() {
     }
 
     return sorted;
-  }, [savedVideos, videoFilterCategory, videoFilterSubsections, videoSortBy]);
+  }, [savedVideos, videoFilterCategory, videoFilterSubsections, videoShootFilter, videoSortBy]);
 
   useEffect(() => {
     const existingImageIds = new Set(savedImages.map((item) => item.id));
@@ -568,6 +596,7 @@ export default function PhotographyScreen() {
               const category = normalizeTextField((item as any).category, 'Uncategorized');
               const style = normalizeTextField((item as any).style, 'Unstyled');
               const subsection = normalizeTextField((item as any).subsection, '');
+              const shootDone = normalizeShootDoneField((item as any).shootDone);
 
               if (
                 (item as any).id !== id ||
@@ -575,7 +604,8 @@ export default function PhotographyScreen() {
                 (item as any).thumbnailUri !== thumbnailUri ||
                 (item as any).category !== category ||
                 (item as any).style !== style ||
-                (item as any).subsection !== subsection
+                (item as any).subsection !== subsection ||
+                (item as any).shootDone !== shootDone
               ) {
                 repaired = true;
               }
@@ -587,6 +617,7 @@ export default function PhotographyScreen() {
                 category,
                 style,
                 subsection,
+                shootDone,
               } as SavedVideo;
             })
             .filter((item): item is SavedVideo => !!item),
@@ -694,6 +725,7 @@ export default function PhotographyScreen() {
         category: imageForm.category,
         style: imageForm.style,
         subsection: imageForm.subsection.trim(),
+        shootDone: false,
       }));
 
       setSavedImages(prev => [...newSavedImages, ...prev]);
@@ -793,6 +825,7 @@ export default function PhotographyScreen() {
         category: videoForm.category,
         style: videoForm.style,
         subsection: subsectionValue,
+        shootDone: false,
       }));
 
       // Render immediately with existing thumbnails from selection step.
@@ -862,13 +895,13 @@ export default function PhotographyScreen() {
           if (previewSection !== 'images' || !previewVisible) return false;
           const horizontalDistance = Math.abs(gestureState.dx);
           const verticalDistance = Math.abs(gestureState.dy);
-          return horizontalDistance > verticalDistance && horizontalDistance > 18;
+          return horizontalDistance > verticalDistance && horizontalDistance > 10;
         },
         onPanResponderRelease: (_, gestureState) => {
           if (previewSection !== 'images') return;
           const horizontalDistance = Math.abs(gestureState.dx);
           const verticalDistance = Math.abs(gestureState.dy);
-          if (horizontalDistance < 48 || horizontalDistance < verticalDistance) return;
+          if (horizontalDistance < 28 || horizontalDistance < verticalDistance) return;
 
           if (gestureState.dx < 0) {
             setPreviewIndex((prev) => Math.min(Math.max(previewImages.length - 1, 0), prev + 1));
@@ -880,17 +913,19 @@ export default function PhotographyScreen() {
     [previewSection, previewVisible, previewImages.length],
   );
 
-  const resetImageFilters = () => {
-    setImageFilterCategory('All');
-    setImageSortBy('Newest');
-    setImageFilterSubsections([]);
-  };
+   const resetImageFilters = () => {
+     setImageFilterCategory('All');
+     setImageSortBy('Newest');
+     setImageFilterSubsections([]);
+     setImageShootFilter('All');
+   };
 
-  const resetVideoFilters = () => {
-    setVideoFilterCategory('All');
-    setVideoSortBy('Newest');
-    setVideoFilterSubsections([]);
-  };
+   const resetVideoFilters = () => {
+     setVideoFilterCategory('All');
+     setVideoSortBy('Newest');
+     setVideoFilterSubsections([]);
+     setVideoShootFilter('All');
+   };
 
   const displayedImageIdSet = useMemo(() => new Set(displayedImages.map((item) => item.id)), [displayedImages]);
   const displayedVideoIdSet = useMemo(() => new Set(displayedVideos.map((item) => item.id)), [displayedVideos]);
@@ -913,15 +948,45 @@ export default function PhotographyScreen() {
     handleOpenPreview(tappedIndex, 'images', displayedImages);
   };
 
-  const handleImageLoadError = (item: SavedImage) => {
-    setFailedImageIds((prev) => (prev.includes(item.id) ? prev : [...prev, item.id]));
+   const handleImageLoadError = (item: SavedImage) => {
+     setFailedImageIds((prev) => (prev.includes(item.id) ? prev : [...prev, item.id]));
 
-    // If a local file is gone, prune it from storage to avoid repeated blank tiles.
-    if (item.uri.startsWith('file://')) {
-      setSavedImages((prev) => prev.filter((img) => img.id !== item.id));
-      setSelectedImageIds((prev) => prev.filter((id) => id !== item.id));
-    }
-  };
+     // If a local file is gone, prune it from storage to avoid repeated blank tiles.
+     if (item.uri.startsWith('file://')) {
+       setSavedImages((prev) => prev.filter((img) => img.id !== item.id));
+       setSelectedImageIds((prev) => prev.filter((id) => id !== item.id));
+     }
+   };
+
+   const toggleImageShootDone = (imageId: string) => {
+     setSavedImages((prev) =>
+       prev.map((item) =>
+         item.id === imageId ? { ...item, shootDone: !item.shootDone } : item
+       )
+     );
+   };
+
+   const toggleVideoShootDone = (videoId: string) => {
+     setSavedVideos((prev) =>
+       prev.map((item) =>
+         item.id === videoId ? { ...item, shootDone: !item.shootDone } : item
+       )
+     );
+   };
+
+   const clearAllImageShootsDone = () => {
+     setSavedImages((prev) =>
+       prev.map((item) => ({ ...item, shootDone: false }))
+     );
+     setImageShootFilter('All');
+   };
+
+   const clearAllVideoShootsDone = () => {
+     setSavedVideos((prev) =>
+       prev.map((item) => ({ ...item, shootDone: false }))
+     );
+     setVideoShootFilter('All');
+   };
 
   const toggleVideoSelection = (id: string) => {
     setSelectedVideoIds((prev) =>
@@ -1390,8 +1455,26 @@ export default function PhotographyScreen() {
     );
   };
 
-  const activePreviewItem =
-    previewSection === 'images' ? previewImages[previewIndex] : displayedVideos[previewIndex];
+  const activePreviewItem = useMemo(() => {
+    if (previewSection === 'images') {
+      const snapshot = previewImages[previewIndex];
+      if (!snapshot) return undefined;
+      return savedImages.find((item) => item.id === snapshot.id) || snapshot;
+    }
+
+    const snapshot = displayedVideos[previewIndex];
+    if (!snapshot) return undefined;
+    return savedVideos.find((item) => item.id === snapshot.id) || snapshot;
+  }, [previewSection, previewImages, displayedVideos, previewIndex, savedImages, savedVideos]);
+
+  const handleTogglePreviewShootDone = () => {
+    if (!activePreviewItem) return;
+    if (previewSection === 'images') {
+      toggleImageShootDone(activePreviewItem.id);
+      return;
+    }
+    toggleVideoShootDone(activePreviewItem.id);
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -1466,6 +1549,49 @@ export default function PhotographyScreen() {
               <Ionicons name="refresh-outline" size={16} color={colors.textSecondary} />
             </TouchableOpacity>
 
+            <View style={{ position: 'relative' }}>
+              <TouchableOpacity
+                style={[styles.iconControlButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={() => setImageShootMenuVisible(!imageShootMenuVisible)}
+              >
+                <Ionicons name="camera-outline" size={16} color={colors.textSecondary} />
+              </TouchableOpacity>
+
+              {imageShootMenuVisible && (
+                <View style={[styles.dropdownMenu, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                  <TouchableOpacity
+                    style={[styles.dropdownMenuItem, { borderBottomColor: colors.border }]}
+                    onPress={() => {
+                      setImageShootFilter('Done');
+                      setImageShootMenuVisible(false);
+                    }}
+                  >
+                    <Text style={[styles.dropdownMenuItemText, { color: colors.text }]}>Filter Done</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.dropdownMenuItem, { borderBottomColor: colors.border }]}
+                    onPress={() => {
+                      setImageShootFilter('Pending');
+                      setImageShootMenuVisible(false);
+                    }}
+                  >
+                    <Text style={[styles.dropdownMenuItemText, { color: colors.text }]}>Filter Pending</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.dropdownMenuItem}
+                    onPress={() => {
+                      clearAllImageShootsDone();
+                      setImageShootMenuVisible(false);
+                    }}
+                  >
+                    <Text style={[styles.dropdownMenuItemText, { color: colors.danger }]}>Clear All</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
             {isImageSelectionMode && (
               <TouchableOpacity
                 style={[styles.iconControlButton, { backgroundColor: colors.surface, borderColor: colors.danger }]}
@@ -1524,6 +1650,18 @@ export default function PhotographyScreen() {
                       </View>
                     )}
                   </TouchableOpacity>
+                  {!isImageSelectionMode && (
+                    <TouchableOpacity
+                      style={[styles.shootDoneButton, { backgroundColor: item.shootDone ? colors.success : colors.surface }]}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        toggleImageShootDone(item.id);
+                      }}
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    >
+                      <Ionicons name={item.shootDone ? 'checkmark' : 'ellipse-outline'} size={12} color="#FFFFFF" />
+                    </TouchableOpacity>
+                  )}
                 </View>
                 );
                 })()
@@ -1560,6 +1698,49 @@ export default function PhotographyScreen() {
             >
               <Ionicons name="refresh-outline" size={16} color={colors.textSecondary} />
             </TouchableOpacity>
+
+            <View style={{ position: 'relative' }}>
+              <TouchableOpacity
+                style={[styles.iconControlButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                onPress={() => setVideoShootMenuVisible(!videoShootMenuVisible)}
+              >
+                <Ionicons name="camera-outline" size={16} color={colors.textSecondary} />
+              </TouchableOpacity>
+
+              {videoShootMenuVisible && (
+                <View style={[styles.dropdownMenu, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                  <TouchableOpacity
+                    style={[styles.dropdownMenuItem, { borderBottomColor: colors.border }]}
+                    onPress={() => {
+                      setVideoShootFilter('Done');
+                      setVideoShootMenuVisible(false);
+                    }}
+                  >
+                    <Text style={[styles.dropdownMenuItemText, { color: colors.text }]}>Filter Done</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.dropdownMenuItem, { borderBottomColor: colors.border }]}
+                    onPress={() => {
+                      setVideoShootFilter('Pending');
+                      setVideoShootMenuVisible(false);
+                    }}
+                  >
+                    <Text style={[styles.dropdownMenuItemText, { color: colors.text }]}>Filter Pending</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.dropdownMenuItem}
+                    onPress={() => {
+                      clearAllVideoShootsDone();
+                      setVideoShootMenuVisible(false);
+                    }}
+                  >
+                    <Text style={[styles.dropdownMenuItemText, { color: colors.danger }]}>Clear All</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
 
             {isVideoSelectionMode && (
               <TouchableOpacity
@@ -1638,6 +1819,18 @@ export default function PhotographyScreen() {
                         </View>
                       )}
                     </TouchableOpacity>
+                    {!isVideoSelectionMode && (
+                      <TouchableOpacity
+                        style={[styles.shootDoneButton, { backgroundColor: item.shootDone ? colors.success : colors.surface }]}
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          toggleVideoShootDone(item.id);
+                        }}
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                      >
+                        <Ionicons name={item.shootDone ? 'checkmark' : 'ellipse-outline'} size={12} color="#FFFFFF" />
+                      </TouchableOpacity>
+                    )}
                   </View>
                 );
               })}
@@ -1728,6 +1921,7 @@ export default function PhotographyScreen() {
       <Modal visible={videoFormVisible} animationType="slide" presentationStyle="pageSheet">
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        navigationBarTranslucent
           style={[styles.modalContainer, { backgroundColor: colors.background }]}
         >
           <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
@@ -1799,7 +1993,8 @@ export default function PhotographyScreen() {
                         <Image source={{ uri: videoFormThumbnails[index] }} style={styles.videoTileThumb} resizeMode="cover" />
                       ) : (
                         <Ionicons name="videocam" size={22} color={colors.primary} />
-                      )}
+                      )
+                      }
                     </View>
                     <TouchableOpacity
                       style={[styles.videoTileRemoveButton, { backgroundColor: colors.danger }]}
@@ -2191,20 +2386,53 @@ export default function PhotographyScreen() {
         transparent={false}
         animationType="fade"
         statusBarTranslucent
+        navigationBarTranslucent
         onRequestClose={handleClosePreview}
       >
-        <View style={styles.previewOverlay}>
+        <View
+          style={[
+            styles.previewOverlay,
+            {
+              paddingTop: previewTopInset,
+              paddingBottom: previewBottomInset,
+              paddingLeft: previewSideInset,
+              paddingRight: previewSideInset,
+            },
+          ]}
+        >
           <View style={styles.previewContent}>
             <TouchableOpacity
-              style={[styles.previewCloseButton, { backgroundColor: colors.background + 'CC' }]}
+              style={[styles.previewCloseButton, { top: 8, backgroundColor: colors.background + 'CC' }]}
               onPress={handleClosePreview}
             >
               <Ionicons name="close" size={20} color={colors.text} />
             </TouchableOpacity>
 
+            {activePreviewItem && (
+              <TouchableOpacity
+                style={[
+                  styles.previewShootToggleButton,
+                  {
+                    top: 8,
+                    backgroundColor: activePreviewItem.shootDone ? colors.success : colors.background + 'CC',
+                  },
+                ]}
+                onPress={handleTogglePreviewShootDone}
+              >
+                <Ionicons
+                  name={activePreviewItem.shootDone ? 'checkmark-circle' : 'ellipse-outline'}
+                  size={16}
+                  color="#FFFFFF"
+                />
+                <Text style={styles.previewShootToggleButtonText}>
+                  {activePreviewItem.shootDone ? 'Done' : 'Pending'}
+                </Text>
+              </TouchableOpacity>
+            )}
+
             {previewSection === 'videos' && displayedVideos.length > 0 && (
               <TouchableOpacity
-                style={[styles.previewDeleteButton, { backgroundColor: colors.background + 'CC' }]}
+                style={[styles.previewDeleteButton, { top: 8, backgroundColor: colors.background + 'CC' }]}
                 onPress={handleDeletePreviewVideo}
               >
                 <Ionicons name="trash-outline" size={20} color={colors.danger} />
@@ -2216,10 +2444,13 @@ export default function PhotographyScreen() {
               if (!currentImage) return null;
 
               return (
-                <View style={[styles.previewPage, { width: viewportWidth }]} {...imageSwipeResponder.panHandlers}>
+                <View
+                  style={[styles.previewPage, { width: previewMaxWidth, height: previewMediaMaxHeight }]}
+                  {...imageSwipeResponder.panHandlers}
+                >
                   <ExpoImage
                     source={{ uri: currentImage.uri }}
-                    style={styles.previewImage}
+                    style={[styles.previewImage, { width: previewMaxWidth, height: previewMediaMaxHeight }]}
                     contentFit="contain"
                     transition={120}
                   />
@@ -2260,7 +2491,7 @@ export default function PhotographyScreen() {
               if (!currentVideo) return null;
 
               return (
-                <View style={[styles.previewPage, { width: viewportWidth }]}>
+                <View style={[styles.previewPage, { width: previewMaxWidth, height: previewMediaMaxHeight }]}>
                   <View
                     style={[
                       styles.previewVideoCard,
@@ -2268,11 +2499,12 @@ export default function PhotographyScreen() {
                         backgroundColor: colors.card,
                         borderColor: colors.border,
                         width: '100%',
-                        maxWidth: 560,
+                        maxWidth: Math.min(560, previewMaxWidth),
+                        maxHeight: previewMediaMaxHeight,
                       },
                     ]}
                   >
-                    <PreviewVideoPlayer uri={currentVideo.uri} shouldPlay />
+                    <PreviewVideoPlayer uri={currentVideo.uri} shouldPlay playerHeight={previewVideoPlayerHeight} />
 
                   {displayedVideos.length > 1 && (
                     <>
@@ -2307,18 +2539,28 @@ export default function PhotographyScreen() {
             })()}
 
             {(previewSection === 'images' ? previewImages : displayedVideos).length > 0 && (
-              <Text style={[styles.previewCounter, { color: colors.textSecondary }]}>
+              <Text style={[styles.previewCounter, { bottom: previewBottomInset + 64, color: colors.textSecondary }]}>
                 {previewIndex + 1} / {(previewSection === 'images' ? previewImages : displayedVideos).length}
               </Text>
             )}
 
             {activePreviewItem && (
-              <View style={styles.previewMetaContainer}>
+              <View style={[styles.previewMetaContainer, { bottom: previewBottomInset + 12 }]}>
                 <View style={styles.previewMetaPill}>
                   <Text style={styles.previewMetaText}>{activePreviewItem.category || 'Uncategorized'}</Text>
                 </View>
                 <View style={styles.previewMetaPill}>
                   <Text style={styles.previewMetaText}>{activePreviewItem.style || 'Unstyled'}</Text>
+                </View>
+                <View style={styles.previewMetaPill}>
+                  <View style={styles.previewMetaStatusRow}>
+                    <Ionicons
+                      name={activePreviewItem.shootDone ? 'checkmark-circle' : 'ellipse-outline'}
+                      size={12}
+                      color="#FFFFFF"
+                    />
+                    <Text style={styles.previewMetaText}>{activePreviewItem.shootDone ? 'Shoot Done' : 'Shoot Pending'}</Text>
+                  </View>
                 </View>
                 {!!activePreviewItem.subsection?.trim() && (
                   <View style={styles.previewMetaPill}>
@@ -2528,6 +2770,17 @@ const styles = StyleSheet.create({
     width: 18,
     height: 18,
     borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shootDoneButton: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    zIndex: 2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2862,6 +3115,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  previewShootToggleButton: {
+    position: 'absolute',
+    left: 22,
+    zIndex: 2,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  previewShootToggleButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   previewCounter: {
     position: 'absolute',
     bottom: 88,
@@ -2890,6 +3159,30 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '600',
+  },
+  previewMetaStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  dropdownMenu: {
+    position: 'absolute',
+    top: 35,
+    right: 0,
+    borderWidth: 1,
+    borderRadius: 8,
+    overflow: 'hidden',
+    zIndex: 1000,
+    minWidth: 140,
+  },
+  dropdownMenuItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  dropdownMenuItemText: {
+    fontSize: 14,
+    fontWeight: '500',
   },
 });
 
