@@ -37,6 +37,7 @@ export const ImagePicker: React.FC<ImagePickerProps> = ({
   }, [value, multiple]);
 
   const currentValues = multiple ? (values || []) : value ? [value] : [];
+  const isUnlimitedSelection = multiple && maxSelection <= 0;
 
   const persistPickedImage = async (assetUri: string): Promise<string> => {
     try {
@@ -70,7 +71,7 @@ export const ImagePicker: React.FC<ImagePickerProps> = ({
       mediaTypes: ['images'],
       allowsEditing: !multiple,
       allowsMultipleSelection: multiple,
-      selectionLimit: multiple ? maxSelection : 1,
+      selectionLimit: multiple ? (isUnlimitedSelection ? 0 : maxSelection) : 1,
       quality: 0.7,
     });
 
@@ -85,7 +86,9 @@ export const ImagePicker: React.FC<ImagePickerProps> = ({
       if (picked.length === 0) return;
 
       if (multiple) {
-        const merged = [...currentValues, ...picked].slice(0, maxSelection);
+        const merged = isUnlimitedSelection
+          ? [...currentValues, ...picked]
+          : [...currentValues, ...picked].slice(0, maxSelection);
         onChangeValues?.(merged);
       } else {
         onChange(picked[0]);
@@ -123,7 +126,7 @@ export const ImagePicker: React.FC<ImagePickerProps> = ({
                 </TouchableOpacity>
               </View>
             ))}
-            {currentValues.length < maxSelection && (
+            {(isUnlimitedSelection || currentValues.length < maxSelection) && (
               <TouchableOpacity
                 style={[styles.addMoreTile, { backgroundColor: colors.surface, borderColor: colors.border }]}
                 onPress={pickImage}

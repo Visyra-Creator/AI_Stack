@@ -326,8 +326,7 @@ export default function PhotographyScreen() {
   }, [categoryOptions, savedImages, savedVideos]);
 
   const displayedImages = useMemo(() => {
-    const failedIdSet = new Set(failedImageIds);
-    const validImages = savedImages.filter((item) => isSupportedImageUri(item.uri) && !failedIdSet.has(item.id));
+    const validImages = savedImages.filter((item) => isSupportedImageUri(item.uri));
     const filtered = validImages.filter((item) => {
       if (imageFilterCategory === 'All') return true;
       return item.category === imageFilterCategory;
@@ -718,8 +717,17 @@ export default function PhotographyScreen() {
 
     setIsSavingImageForm(true);
     try {
+      const persistedImages = await Promise.all(
+        imageForm.images.map((uri) => persistImageUri(uri)),
+      );
+      const validPersistedImages = persistedImages.filter((uri) => isSupportedImageUri(uri));
+      if (validPersistedImages.length === 0) {
+        Alert.alert('Save failed', 'Unable to persist selected images. Please re-select and try again.');
+        return;
+      }
+
       const timestamp = Date.now();
-      const newSavedImages = imageForm.images.map((uri, index) => ({
+      const newSavedImages = validPersistedImages.map((uri, index) => ({
         id: `${timestamp}-${index}`,
         uri,
         category: imageForm.category,
@@ -729,7 +737,7 @@ export default function PhotographyScreen() {
       }));
 
       setSavedImages(prev => [...newSavedImages, ...prev]);
-      Alert.alert('Saved', `${imageForm.images.length} image(s) added to Images section.`);
+      Alert.alert('Saved', `${newSavedImages.length} image(s) added to Images section.`);
       resetImageForm();
       setImageFormVisible(false);
     } finally {
@@ -950,12 +958,6 @@ export default function PhotographyScreen() {
 
    const handleImageLoadError = (item: SavedImage) => {
      setFailedImageIds((prev) => (prev.includes(item.id) ? prev : [...prev, item.id]));
-
-     // If a local file is gone, prune it from storage to avoid repeated blank tiles.
-     if (item.uri.startsWith('file://')) {
-       setSavedImages((prev) => prev.filter((img) => img.id !== item.id));
-       setSelectedImageIds((prev) => prev.filter((id) => id !== item.id));
-     }
    };
 
    const toggleImageShootDone = (imageId: string) => {
@@ -2733,6 +2735,12 @@ const styles = StyleSheet.create({
   galleryImage: {
     width: '100%',
     height: '100%',
+  },
+  galleryImageFallback: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   videoCard: {
     width: '100%',
