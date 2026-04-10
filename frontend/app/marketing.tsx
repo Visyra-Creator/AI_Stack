@@ -1445,4 +1445,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 10,
   },
+  imageSection: {
+    gap: 12,
+    marginTop: 8,
+  },
 });

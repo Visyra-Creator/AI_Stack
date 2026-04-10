@@ -1921,7 +1921,6 @@ export default function PhotographyScreen() {
       <Modal visible={videoFormVisible} animationType="slide" presentationStyle="pageSheet">
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        navigationBarTranslucent
           style={[styles.modalContainer, { backgroundColor: colors.background }]}
         >
           <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>

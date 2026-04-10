@@ -5,7 +5,7 @@ import { TextInput, TextInputProps } from 'react-native';
  * SafeTextInput - Prevents "Boolean cannot be cast to String" errors
  * Ensures placeholder, value, and other string props are always strings
  */
-export const SafeTextInput = React.forwardRef<typeof TextInput, TextInputProps>(
+export const SafeTextInput = React.forwardRef<TextInput, TextInputProps>(
   (
     {
       placeholder,

@@ -353,7 +353,7 @@ export async function addPocketBaseItem<T extends { id: string; createdAt: numbe
     createdAt: now,
     updatedAt: now,
     ...((item as any).isFavorite ? { favoritedAt: now } : {}),
-  } as T;
+  } as unknown as T;
 
   await pb.collection('resources').create({
     legacy_id: id,

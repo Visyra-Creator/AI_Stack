@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, ViewStyle, TextStyle } from 'react-native';
+import { View, Text, StyleSheet, ViewStyle, TextStyle, StyleProp } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/src/context/ThemeContext';
 import { Button } from '@/src/components/common/Button';
@@ -10,7 +10,7 @@ interface EmptyStateProps {
   description: string;
   actionLabel?: string;
   onAction?: () => void;
-  buttonStyle?: ViewStyle;
+  buttonStyle?: StyleProp<ViewStyle>;
   buttonTextStyle?: TextStyle;
 }
 

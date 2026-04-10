@@ -259,12 +259,14 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = org.name.AIKeeper;
-				PRODUCT_NAME = AIKeeper;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.sagar3198.aistackkeeper3198";
+				PRODUCT_NAME = "AIKeeper";
 				SWIFT_OBJC_BRIDGING_HEADER = "AIKeeper/AIKeeper-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				CODE_SIGN_ENTITLEMENTS = AIKeeper/AIKeeper.entitlements;
 			};
 			name = Debug;
 		};
@@ -286,11 +288,13 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = org.name.AIKeeper;
-				PRODUCT_NAME = AIKeeper;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.sagar3198.aistackkeeper3198";
+				PRODUCT_NAME = "AIKeeper";
 				SWIFT_OBJC_BRIDGING_HEADER = "AIKeeper/AIKeeper-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				CODE_SIGN_ENTITLEMENTS = AIKeeper/AIKeeper.entitlements;
 			};
 			name = Release;
 		};

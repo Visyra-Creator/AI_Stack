@@ -768,7 +768,7 @@ export default function NotesScreen() {
                 <Text
                   style={[styles.noteCardDate, { color: colors.textSecondary }]}
                 >
-                  {formatDateTime(note.updatedAt)}
+                  {formatDateTime(note.updatedAt ?? note.createdAt)}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -871,7 +871,7 @@ export default function NotesScreen() {
               </View>
               <View style={[styles.noteDetailsMetaPill, { backgroundColor: colors.surface }]}>
                 <Text style={[styles.noteDetailsMetaText, { color: colors.textSecondary }]}>
-                  {selectedNote ? formatDateTime(selectedNote.updatedAt) : ''}
+                  {selectedNote ? formatDateTime(selectedNote.updatedAt ?? selectedNote.createdAt) : ''}
                 </Text>
               </View>
             </View>
@@ -1043,7 +1043,6 @@ export default function NotesScreen() {
       >
         <View style={styles.modalOverlay}>
           <View
-            nativeID="note-attachment-section"
             style={[styles.sectionModalContent, { backgroundColor: colors.card, borderColor: colors.border }]}
           >
             <Text style={[styles.sectionModalTitle, { color: colors.text }]}>Add Attachment</Text>
@@ -1053,7 +1052,6 @@ export default function NotesScreen() {
                 setNoteAttachmentMenuVisible(false);
                 pickFiles();
               }}
-              nativeID="note-upload-documents-button"
               style={[styles.attachmentMenuItem, { borderColor: colors.border, backgroundColor: colors.surface }]}
             >
               <Ionicons name="document-attach-outline" size={18} color={colors.primary} />
@@ -1066,7 +1064,6 @@ export default function NotesScreen() {
                 setNoteUrlMode('document');
                 setNoteUrlModalVisible(true);
               }}
-              nativeID="note-add-url-button"
               style={[styles.attachmentMenuItem, { borderColor: colors.border, backgroundColor: colors.surface }]}
             >
               <Ionicons name="link-outline" size={18} color={colors.primary} />
@@ -1097,7 +1094,6 @@ export default function NotesScreen() {
       <Modal visible={noteUrlModalVisible} transparent animationType="fade" onRequestClose={() => setNoteUrlModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View
-            nativeID="note-url-section"
             style={[styles.sectionModalContent, { backgroundColor: colors.card, borderColor: colors.border }]}
           >
             <Text style={[styles.sectionModalTitle, { color: colors.text }]}>
@@ -1134,14 +1130,12 @@ export default function NotesScreen() {
                   setNoteUrlValue('');
                   setNoteUrlModalVisible(false);
                 }}
-                nativeID="note-url-cancel-button"
                 style={[styles.sectionModalButton, { backgroundColor: colors.surface }]}
               >
                 <Text style={[styles.sectionModalButtonText, { color: colors.text }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={addUrlAttachment}
-                nativeID="note-url-add-button"
                 style={[styles.sectionModalButton, { backgroundColor: colors.primary }]}
               >
                 <Text style={[styles.sectionModalButtonText, { color: colors.surface }]}>Add</Text>
@@ -1589,6 +1583,18 @@ const styles = StyleSheet.create({
   noteHeaderTitleContainer: {
     flex: 1,
     marginHorizontal: 12,
+  },
+  noteTitleInputWrap: {
+    paddingHorizontal: 24,
+    paddingTop: 12,
+  },
+  noteTitleInput: {
+    borderWidth: 1,
+    borderRadius: 12,
+    fontSize: 18,
+    fontWeight: '700',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   noteHeaderTitleInput: {
     flex: 1,

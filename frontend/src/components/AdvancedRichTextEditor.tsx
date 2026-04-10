@@ -251,9 +251,9 @@ const TableDisplay: React.FC<{
                   }
                   columnWidth={columnWidth}
                   isLastColumn={colIndex === table.cols - 1}
-                  isHeader={
+                  isHeader={!!(
                     (table.hasHeaderRow && rowIndex === 0) || (table.hasHeaderColumn && colIndex === 0)
-                  }
+                  )}
                 />
               ))}
             </View>

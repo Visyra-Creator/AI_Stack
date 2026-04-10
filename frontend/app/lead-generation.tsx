@@ -529,7 +529,7 @@ export default function LeadGenerationScreen() {
     if (activeSort === 'name') {
       sorted.sort((a, b) => a.name.localeCompare(b.name));
     } else if (activeSort === 'category') {
-      sorted.sort((a, b) => a.category.localeCompare(b.category));
+      sorted.sort((a, b) => (a.category ?? '').localeCompare(b.category ?? ''));
     } else {
       sorted.sort((a, b) => b.createdAt - a.createdAt);
     }
@@ -1523,5 +1523,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 6,
     marginRight: 8,
+  },
+  textArea: {
+    minHeight: 80,
   },
 });

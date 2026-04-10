@@ -91,6 +91,7 @@ export interface AIStackItem {
   toolName: string;
   url: string;
   categories: string[];
+  category?: string;
   description?: string;
   images?: string[];
   files?: string[];
@@ -117,7 +118,7 @@ export interface PromptItem {
   generatedImages?: string[];
   files?: string[];
   aiToolUsed: string;
-  category: string;
+  category?: string;
   categories?: string[];
   type: 'general' | 'personal';
   isFavorite?: boolean;
@@ -132,6 +133,7 @@ export interface ToolItem {
   link: string;
   description: string;
   instructions: string;
+  category?: string;
   categories?: string[];
   image?: string;
   images?: string[];
@@ -148,6 +150,7 @@ export interface TutorialItem {
   description: string;
   instructions: string;
   videoLink?: string;
+  category?: string;
   categories?: string[];
   files: string[];
   image?: string;
@@ -164,6 +167,7 @@ export interface OpenSourceItem {
   description: string;
   instructions: string;
   links: { label: string; url: string }[];
+  category?: string;
   categories?: string[];
   images?: string[];
   files?: string[];
@@ -180,6 +184,7 @@ export interface LeadGenerationItem {
   instructions: string;
   link: string;
   videoLink?: string;
+  category?: string;
   categories?: string[];
   isFavorite?: boolean;
   images?: string[];
@@ -196,6 +201,7 @@ export interface BusinessItem {
   description: string;
   link: string;
   instructions: string;
+  category?: string;
   categories?: string[];
   images?: string[];
   files?: string[];
@@ -215,6 +221,7 @@ export interface ContentCreationItem {
   videoFile?: string;
   images?: string[];
   files?: string[];
+  category?: string;
   categories?: string[];
   isFavorite?: boolean;
   createdAt: number;
@@ -227,6 +234,7 @@ export interface WebsiteItem {
   name: string;
   toolLink: string;
   description: string;
+  category?: string;
   categories?: string[];
   pricingType?: 'free' | 'paid';
   pricingDescription?: string;
@@ -241,6 +249,7 @@ export interface ReferenceItem {
   name: string;
   link: string;
   description: string;
+  category?: string;
   files?: string[];
   isFavorite?: boolean;
   createdAt: number;
@@ -253,6 +262,7 @@ export interface MarketingItem {
   name: string;
   toolLink: string;
   description: string;
+  category?: string;
   categories?: string[];
   instructions: string;
   link: string;

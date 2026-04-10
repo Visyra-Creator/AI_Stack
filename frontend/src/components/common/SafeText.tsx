@@ -5,7 +5,7 @@ import { Text, TextProps } from 'react-native';
  * SafeText - Prevents "Boolean cannot be cast to String" errors
  * Safely converts any value to a valid string before rendering
  */
-export const SafeText = React.forwardRef<typeof Text, TextProps & { children?: any }>(
+export const SafeText = React.forwardRef<Text, TextProps & { children?: any }>(
   ({ children, ...props }, ref) => {
     // Convert children to safe string value
     const getSafeChildren = () => {

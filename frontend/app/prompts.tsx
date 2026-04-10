@@ -471,7 +471,7 @@ export default function PromptsScreen() {
       return a.promptName.localeCompare(b.promptName);
     }
     if (activeSort === 'category') {
-      return a.category.localeCompare(b.category);
+      return (a.category ?? '').localeCompare(b.category ?? '');
     }
     return b.createdAt - a.createdAt;
   });
@@ -1436,6 +1436,11 @@ const styles = StyleSheet.create({
   detailsSection: {
     marginBottom: 14,
   },
+  detailsContent: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
   detailsLabel: {
     fontSize: 12,
     fontWeight: '600',
@@ -1451,10 +1456,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
   },
+  detailsImageHint: {
+    fontSize: 12,
+    marginBottom: 8,
+  },
   detailsImage: {
     width: 110,
     height: 110,
     borderRadius: 10,
+  },
+  imageSection: {
+    gap: 12,
+    marginTop: 8,
   },
   detailsFileRow: {
     flexDirection: 'row',
